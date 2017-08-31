@@ -33,10 +33,12 @@ float last_measurement = -1.0f;
 static PT_THREAD (protothread_measurement(struct pt *pt)) {
     PT_BEGIN(pt);
     while(1) {
-        // set RB3(pin7) to zero
+        // set RB3(pin7) to zero, to discharge
         PORTSetPinsDigitalOut(IOPORT_B, BIT_3);
         PORTClearBits(IOPORT_B, BIT_3);
         PT_YIELD_TIME_msec(100);
+        
+        // Set Pin7 as input comparator 
         mPORTBSetPinsDigitalIn(BIT_3);
         WriteTimer3(0); // set timer to 0
         PT_YIELD_TIME_msec(500);
@@ -46,6 +48,7 @@ static PT_THREAD (protothread_measurement(struct pt *pt)) {
 
 const float ln_magic = -0.4519851237f; // ln(1-1.2/3.3)
 const float R = 693000.0f; // measur first
+
 
 static PT_THREAD (protothread_timer(struct pt *pt)) {
     PT_BEGIN(pt);
@@ -57,18 +60,40 @@ static PT_THREAD (protothread_timer(struct pt *pt)) {
         PT_YIELD_TIME_msec(200);
         sys_time_seconds++;
         tft_fillRoundRect(0, 10, 200, 55, 1, ILI9340_BLACK);// x,y,w,h,radius,color
-        tft_setCursor(0, 10);
-        tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
-        sprintf(buffer,"%d", capture1);
-        tft_writeString(buffer);
+        
+       
+//        tft_setCursor(0, 10);
+//
+//        sprintf(buffer,"%d", capture1);
+//        tft_writeString(buffer);
+        
+        tft_setTextColor(ILI9340_YELLOW); 
+        tft_setTextSize(2);
+        
+        if(capture1 < 5)
+        { tft_setCursor(0,25);
+          tft_setTextSize(1);
+          sprintf(buffer,"No Capacitor Is Present");
+          tft_writeString(buffer);
+        }
+        else
+        {
         tft_setCursor(0, 25);
         float dt = capture1*(256.0f/40e6); // second
         float c_val = -(dt)/(R*ln_magic);
-        sprintf(buffer,"cap=%.04f nf", c_val*1e9);
+        sprintf(buffer,"C = %.01f nf", c_val*1e9);
         tft_writeString(buffer);
-        tft_setCursor(0, 40);
-        sprintf(buffer,"dt=%.04f ms",dt*1000);
-        tft_writeString(buffer);
+        
+//        tft_setCursor(0, 40);
+//        sprintf(buffer,"dt=%.01f ms",dt*1000);
+//        tft_writeString(buffer);
+        }
+        
+        if(sys_time_seconds % 5 == 0)
+        { tft_fillRoundRect(110, 150, 20, 20, 10, ILI9340_BLACK); }
+        else if (sys_time_seconds % 5 == 3)
+        {tft_fillRoundRect(110, 150, 20, 20, 10, ILI9340_YELLOW);}
+        
     }
      
     PT_END(pt);
@@ -89,7 +114,9 @@ void main() {
     OpenTimer3(T3_ON | T3_SOURCE_INT | T3_PS_1_256, 0xffff);
     OpenCapture1(  IC_EVERY_RISE_EDGE | IC_INT_1CAPTURE | IC_TIMER3_SRC | IC_ON );
     ConfigIntCapture1(IC_INT_ON | IC_INT_PRIOR_3 | IC_INT_SUB_PRIOR_3 );
-    INTClearFlag(INT_IC1);
+    
+    INTClearFlag(INT_IC1);  // Can be deleted 
+    
     PPSInput(3, IC1, RPB13);   // pin24
     
     PPSOutput(4, RPB9, C1OUT); // pin18
@@ -97,6 +124,7 @@ void main() {
     CMP1Open(CMP_ENABLE | CMP_OUTPUT_ENABLE | CMP1_NEG_INPUT_IVREF);
     
     PT_setup();
+    
     INTEnableSystemMultiVectoredInt();
     
     PT_INIT(&pt_timer);

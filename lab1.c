@@ -24,8 +24,8 @@ short capture1, last_capture1=0, capture_period=99;
 void __ISR(_INPUT_CAPTURE_1_VECTOR, ipl3) IC1Handler(void) {
   // capture1 record the value of capture buffer register
   capture1 = mIC1ReadCapture();
-     // capture_period = capture1 - last_capture1 ;
-     // last_capture1 = capture1 ;
+  // capture_period = capture1 - last_capture1 ;
+  // last_capture1 = capture1 ;
   // clear the timer interrupt flag
   mIC1ClearIntFlag();
 }
@@ -49,7 +49,7 @@ static PT_THREAD (protothread_measurement(struct pt *pt)) {
 }
 
 const float ln_magic = -0.4519851237f; // ln(1-1.2/3.3)
-const float R = 693000.0f; // measur first
+const float R = 693000.0f; // measured first
 
 // TFT_Screen thread, Control the update of TFT. 
 static PT_THREAD (protothread_timer(struct pt *pt)) {
@@ -95,11 +95,14 @@ void main() {
   ANSELA = 0; ANSELB = 0; 
   PORTSetPinsDigitalOut(IOPORT_A, BIT_0);
 
+  // Enable timer1 to let led blink
   OpenTimer1( T1_ON|T1_SOURCE_INT|T1_PS_1_256, T1_Tick);
   ConfigIntTimer1(T1_INT_ON|T1_INT_PRIOR_2);
 
+  // Enable timer3 and bind the timer to capture1
   OpenTimer3(T3_ON | T3_SOURCE_INT | T3_PS_1_256, 0xffff);
   OpenCapture1(  IC_EVERY_RISE_EDGE | IC_INT_1CAPTURE | IC_TIMER3_SRC | IC_ON );
+  // Enable the interrupt of inputcapture1
   ConfigIntCapture1(IC_INT_ON | IC_INT_PRIOR_3 | IC_INT_SUB_PRIOR_3 );
 
   INTClearFlag(INT_IC1);  // Can be deleted 
@@ -114,6 +117,7 @@ void main() {
 
   INTEnableSystemMultiVectoredInt();
 
+  // Init
   PT_INIT(&pt_timer);
   PT_INIT(&pt_capacitance);
 

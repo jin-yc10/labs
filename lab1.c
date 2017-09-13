@@ -10,6 +10,7 @@ char buffer[60];
 
 static int cnt = 0;
 void __ISR(_TIMER_1_VECTOR, ipl3) Timer1Handler(void) {
+  // use LED to confirm the system is running now
   if( cnt == 0 ) {
     PORTToggleBits(IOPORT_A, BIT_0);
     cnt = 3;
@@ -21,9 +22,10 @@ void __ISR(_TIMER_1_VECTOR, ipl3) Timer1Handler(void) {
 
 short capture1, last_capture1=0, capture_period=99;
 void __ISR(_INPUT_CAPTURE_1_VECTOR, ipl3) IC1Handler(void) {
+  // capture1 record the value of capture buffer register
   capture1 = mIC1ReadCapture();
-  capture_period = capture1 - last_capture1 ;
-  last_capture1 = capture1 ;
+     // capture_period = capture1 - last_capture1 ;
+     // last_capture1 = capture1 ;
   // clear the timer interrupt flag
   mIC1ClearIntFlag();
 }
@@ -49,34 +51,32 @@ static PT_THREAD (protothread_measurement(struct pt *pt)) {
 const float ln_magic = -0.4519851237f; // ln(1-1.2/3.3)
 const float R = 693000.0f; // measur first
 
-
+// TFT_Screen thread, Control the update of TFT. 
 static PT_THREAD (protothread_timer(struct pt *pt)) {
   PT_BEGIN(pt);
   tft_setCursor(0, 0);
   tft_setTextColor(ILI9340_WHITE);  tft_setTextSize(1);
   tft_writeString("Time in seconds since boot\n");
   while(1) {
-    // yield time 1 second
+ // yield time 0.2 second
     PT_YIELD_TIME_msec(200);
     sys_time_seconds++;
     tft_fillRoundRect(0, 10, 200, 55, 1, ILI9340_BLACK);// x,y,w,h,radius,color
     tft_setTextColor(ILI9340_YELLOW); 
     tft_setTextSize(2);
-        
+ // Check if there is a capacitor or not
     if( capture1 < 5 ) { 
       tft_setCursor(0,25);
       tft_setTextSize(1);
       sprintf(buffer,"No Capacitor Is Present");
       tft_writeString(buffer);
     } else {
+ // Calculate value of capacitor from timer counter 
       tft_setCursor(0, 25);
       float dt = capture1*(256.0f/40e6); // second
       float c_val = -(dt)/(R*ln_magic);
       sprintf(buffer,"C = %.01f nf", c_val*1e9);
       tft_writeString(buffer);
-//        tft_setCursor(0, 40);
-//        sprintf(buffer,"dt=%.01f ms",dt*1000);
-//        tft_writeString(buffer);
     } // END of if(capture1 < 5)
     if(sys_time_seconds % 5 == 0)
       tft_fillRoundRect(110, 150, 20, 20, 10, ILI9340_BLACK);

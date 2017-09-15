@@ -12,6 +12,8 @@
 #include "tft_master.h"
 #include "tft_gfx.h"
 
+#define _SUPPRESS_PLIB_WARNING
+
 // need for rand function
 #include <stdlib.h>
 
@@ -108,29 +110,59 @@ unsigned int syll_start = 0;
 float env_val = 0;
 
 
+enum ux_state {
+    select_parameter,
+    set_parameter,
+    playing,
+    test_mode
+};
+
+struct parameter {
+    const char* name;
+    int digits;
+    int min_val;
+    int max_val;
+    int val;
+};
+
+struct parameter paras[5] = {
+    {"chi_int", 4, 10, 1000, 200},
+    {"num_syl", 3,  1, 100,  3},
+    {"syl_dur", 3,  5, 100,  30},
+    {"syl_int", 3, 10, 100,  50},
+    {"bur_frq", 4, 1000, 6000, 2000},
+};
+static enum ux_state _state = select_parameter;
+
 void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void)
 {
     // 74 cycles to get to this point from timer event
     mT2ClearIntFlag();
     
-    if(main_cnt == 100*syl_rpt_int*(num_of_syllables-syll_cnt) && syll_cnt != 0 ) {
-        // just start the next syllable
-        phase_accum_main = 0; // sine wave should start from zero
-        syll_start = main_cnt;
-        syll_cnt--;
-    }
-    
-    if(main_cnt-syll_start < 400) {
-        // up edge
-        env_val = ENV_RAMP*(main_cnt-syll_start);
-    } else if( main_cnt-syll_start < 100*syl_duration) {
-        // full
-        env_val = ENV_FULL;
-    } else if( main_cnt-syll_start < 100*syl_duration+400 ) {
-        // down edge
-        env_val = ENV_RAMP*(100*syl_duration+400-main_cnt);
+    if( _state == playing ) {
+        if(main_cnt == 100*syl_rpt_int*(num_of_syllables-syll_cnt) && syll_cnt != 0 ) {
+             // just start the next syllable
+             phase_accum_main = 0; // sine wave should start from zero
+             syll_start = main_cnt;
+             syll_cnt--;
+        }
+
+        if(main_cnt-syll_start < 400) {
+            // up edge
+            env_val = ENV_RAMP*(main_cnt-syll_start);
+        } else if( main_cnt-syll_start < 100*syl_duration) {
+            // full
+            env_val = ENV_FULL;
+        } else if( main_cnt-syll_start < 100*syl_duration+400 ) {
+            // down edge
+            env_val = ENV_RAMP*(100*syl_duration+400-(main_cnt-syll_start));
+        } else {
+            // between two syllables
+            env_val = ENV_ZERO;
+        } 
+    } else if( _state == test_mode ) {
+        env_val = ENV_FULL; // always be full
     } else {
-        // between two syllables
         env_val = ENV_ZERO;
     }
     
@@ -140,15 +172,6 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void)
     // === Channel A =============
     // CS low to start transaction
     mPORTBClearBits(BIT_4); // start transaction
-    // test for ready
-    // while (TxBufFullSPI2());
-    // write to spi2 
-    
-//    if(DAC_data + 2048 > 4095) {
-//        DAC_data =- 2047;
-//    } else if (DAC_data + 2048 < 0) {
-//        DAC_data = -2048;
-//    }
     WriteSPI2( DAC_config_chan_A | (DAC_data + 2048));
     // main DDS phase
     phase_accum_main += phase_incr_main  ;
@@ -163,9 +186,6 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void)
         syll_cnt = num_of_syllables;
     }
 } // end ISR TIMER2
-
-
-
 
 // string buffer
 char buffer[60];
@@ -184,6 +204,8 @@ int number_sysllables=0;
 int syllable_duration=0;
 int syllable_repeat=0;
 int burst_frequency=0;
+
+#define TEST_MODE_FREQ 1000
 
 // === Timer Thread =================================================
 // update a 1 second tick counter
@@ -368,42 +390,32 @@ tft_setCursor(10, 100);
 } // keypad thread
 
 
-enum ux_state {
-    select_parameter,
-    set_parameter,
-    playing
-};
-
-struct parameter {
-    const char* name;
-    int digits;
-    int min_val;
-    int max_val;
-    int val;
-};
-
-struct parameter paras[5] = {
-    {"chi_int", 4, 10, 1000, 100},
-    {"num_syl", 3, 1, 100, 100},
-    {"syl_dur", 3, 5, 100, 100},
-    {"syl_int", 3, 10, 100, 100},
-    {"bur_frq", 4, 1000, 6000, 2000},
-};
 
 static PT_THREAD (protothread_key_alt(struct pt *pt)) {
     PT_BEGIN(pt);
-    int parameter_id = 0;
-    int digit_id = 0;
-    int flag = 0;
-    enum ux_state _state = select_parameter;
-    int last_key = -1;
-    static int keypad, i, pattern;
+    static int parameter_id = 0;
+    static int digit_id = 0;
+    static int flag = 0, digit_need_update = 0;
+    
+    static int last_key = -1;
+    static int keypad, i, pattern, d, left, p, key_scan;;
     static int keytable[12]={0x108, 0x81, 0x101, 0x201, 0x82, 0x102, 0x202, 0x84, 0x104, 0x204, 0x88, 0x208};
+    static int key_cnt[12] ={0};
     // init the keypad pins A0-A3 and B7-B9
     // PortA ports as digital outputs
     mPORTASetPinsDigitalOut(BIT_0 | BIT_1 | BIT_2 | BIT_3);    //Set port as output
     // PortB as inputs
     mPORTBSetPinsDigitalIn(BIT_7 | BIT_8 | BIT_9);    //Set port as input
+    
+    for( i=0; i<5; i++ ) {
+        int digits_cnt = paras[i].digits;
+        int t = paras[i].val;
+        sprintf(buffer, "%*d", digits_cnt, t);
+        tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
+        tft_setCursor(140, 140+i*20);
+        tft_writeString(buffer);                 
+    }
+    
     while(1) {
         // read each row sequentially
         mPORTAClearBits(BIT_0 | BIT_1 | BIT_2 | BIT_3);
@@ -411,7 +423,6 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
         
         // yield time
         PT_YIELD_TIME_msec(30);
-        int i, d, left, p, key_scan;
         for (i=0; i<4; i++) {
             keypad  = mPORTBReadBits(BIT_7 | BIT_8 | BIT_9);
             if(keypad!=0) {keypad |= pattern ; break;}
@@ -422,7 +433,7 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
         // search for keycode
         if (keypad > 0){ // then button is pushed
             for (key_scan=0; key_scan<12; key_scan++){
-                if (keytable[i]==keypad) break;
+                if (keytable[key_scan]==keypad) break;
             }
         }
         else key_scan = -1; // no button pushed
@@ -430,8 +441,20 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
         int key_code = -1;
         if(key_scan != -1 && flag == 0) {
             flag = 1;
-            key_code = key_scan-1;
+            if( key_scan == 0) {
+                key_code = 10;
+            } else if( key_scan == 10 ) {
+                key_code = 9;
+            } else if( key_scan == 11 ) {
+                key_code = 11;
+            } else {
+                key_code = key_scan-1;    
+            }        
+            if( key_code == -1 ) {
+                key_code = 0;
+            }
             last_key = key_code;
+            key_cnt[key_code]++;
         }
         if( key_scan == -1 ) {
             flag = 0;
@@ -441,15 +464,20 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
         switch( _state ) {
             case select_parameter:
                 if( key_code == 1 ) {
+                    tft_fillRoundRect(145,155+parameter_id*20, 
+                            100, 4, 1, ILI9340_BLACK);// x,y,w,h,radius,color
                     parameter_id --;
                     if( parameter_id < 0 ) parameter_id = 4;
                 } else if( key_code == 7 ) {
+                    tft_fillRoundRect(145,155+parameter_id*20, 
+                            100, 4, 1, ILI9340_BLACK);// x,y,w,h,radius,color
                     parameter_id ++;
                     if( parameter_id > 4 ) parameter_id = 0;
                 } else if( key_code == 4 ) {
                     _state = set_parameter;
                 } else if( key_code == 9 ) {
                     _state = playing;
+                    tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
                     chirp_interval = paras[0].val;
                     number_sysllables = paras[1].val;
                     syllable_duration = paras[2].val;
@@ -462,6 +490,12 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
                     syl_duration = syllable_duration;
                     syl_rpt_int = syllable_repeat;
                     burst_freq = burst_frequency;
+                    Fs = (100.0/(burst_freq*TM2_DURA));
+                    phase_incr_main=100.0*two32/Fs;
+                } else if( key_scan == 0 ) {
+                    tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
+                    _state = test_mode;
+                    burst_freq = paras[4].val;
                     Fs = (100.0/(burst_freq*TM2_DURA));
                     phase_incr_main=100.0*two32/Fs;
                 }
@@ -480,25 +514,62 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
                     _state = select_parameter;
                     digit_id = 0;
                 } else if( key_code == 1 ) {
-                    if( paras[parameter_id].val + power <= paras[parameter_id].max_val )
+                    if( paras[parameter_id].val + power <= paras[parameter_id].max_val ) {
                         paras[parameter_id].val += power;
+                        digit_need_update = 1;
+                    }
                 } else if( key_code == 7 ) {
-                    if( paras[parameter_id].val - power >= paras[parameter_id].min_val )
+                    if( paras[parameter_id].val - power >= paras[parameter_id].min_val ) {
                         paras[parameter_id].val -= power;
+                        digit_need_update = 1;
+                    }
+                } else if( key_scan == 0 ) {
+                    tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
+                    _state = test_mode;
+                    burst_freq = TEST_MODE_FREQ;
+                    Fs = (100.0/(burst_freq*TM2_DURA));
+                    phase_incr_main=100.0*two32/Fs;
                 }
                 break;
             case playing:
                 if( key_code == 11 ) {
                     _state = select_parameter;
+                    tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
+                } else if( key_scan == 0 ) {
+                    _state = test_mode;
+                    tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
                 }
+                break;
+            case test_mode:
+                if( key_scan != 0 ) {
+                    // jump back to normal mode asap
+                    tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
+                    _state = select_parameter;
+                }
+                break;
             default:
                 break;
         }
+        tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
+        tft_setCursor(50, 40);
+        if( _state == test_mode ) {
+            sprintf(buffer, "testing");
+            tft_writeString(buffer);
+            continue;
+        } else{    
+            if( _state == playing ) {
+                sprintf(buffer, "playing");
+            } else {
+                sprintf(buffer, "stop");
+            }
+            tft_writeString(buffer);
+        }
         
-        tft_fillRoundRect(100,50, 140, 15, 1, ILI9340_BLACK);// x,y,w,h,radius,color
-        tft_setCursor(50, 50);
-        sprintf(buffer, "key=%d %d %d",last_key,parameter_id,digit_id); 
-        tft_writeString(buffer);
+//        tft_fillRoundRect(50, 70, 140, 15, 1, ILI9340_BLACK);// x,y,w,h,radius,color
+//        tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
+//        tft_setCursor(50, 70);
+//        sprintf(buffer, "key=%d@%d %d %d",last_key,key_cnt[last_key],parameter_id,digit_id); 
+//        tft_writeString(buffer);
         
         for( i=0; i<5; i++ ) {
             if ( i == parameter_id ) {
@@ -512,14 +583,18 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
         }
         
         for( i=0; i<5; i++ ) {
-            int digits_cnt = paras[i].digits;
-            int t = paras[i].val;
-            sprintf(buffer, "%0*d", 4, t);
-            tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
-            tft_setCursor(140, 140+i*20);
-            tft_writeString(buffer);
             if( _state == set_parameter && parameter_id == i ) {                
-                tft_fillRoundRect(245+digit_id*10,40+i*20, 2, 2, 2, ILI9340_RED);// x,y,w,h,radius,color
+                if(digit_need_update == 1) {
+                    tft_fillRoundRect(140,140+i*20, 100, 20, 1, ILI9340_BLACK);// x,y,w,h,radius,color    
+                    int digits_cnt = paras[i].digits;
+                    int t = paras[i].val;
+                    sprintf(buffer, "%*d", digits_cnt, t);
+                    tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
+                    tft_setCursor(140, 140+i*20);
+                    tft_writeString(buffer);                 
+                }
+                tft_fillRoundRect(145,155+i*20, 100, 4, 1, ILI9340_BLACK);// x,y,w,h,radius,color    
+                tft_fillRoundRect(145+digit_id*10,155+i*20, 10, 4, 1, ILI9340_RED);// x,y,w,h,radius,color
             }
         }
     }

@@ -96,20 +96,23 @@ float I_out, Q_out, I_out_base, Q_out_base ;
 
 unsigned int main_cnt = 0;
 
- int chirp_repeat_interval = 150;
- int num_of_syllables = 2, syll_cnt = 2;
- int syl_duration = 30;
- int syl_rpt_int = 50;
- int burst_freq = 2000;
+// Five Parameters
+int chirp_repeat_interval = 150;
+int num_of_syllables = 2, syll_cnt = 2;
+int syl_duration = 30;
+int syl_rpt_int = 50;
+int burst_freq = 2000;
 
+// Counter for one single syllable
 unsigned int syll_start = 0;
 
+// Variable for envelope
 #define ENV_RAMP (1.0f/400.0f)
 #define ENV_ZERO 0.0f
 #define ENV_FULL 1.0f
 float env_val = 0;
 
-
+// User Interface States
 enum ux_state {
     select_parameter,
     set_parameter,
@@ -117,6 +120,7 @@ enum ux_state {
     test_mode
 };
 
+// Struct to organize parameters
 struct parameter {
     const char* name;
     int digits;
@@ -125,6 +129,7 @@ struct parameter {
     int val;
 };
 
+// Predefined information about states
 struct parameter paras[5] = {
     {"chi_int", 4, 10, 1000, 200},
     {"num_syl", 3,  1, 100,  3},
@@ -132,13 +137,14 @@ struct parameter paras[5] = {
     {"syl_int", 3, 10, 100,  50},
     {"bur_frq", 4, 1000, 6000, 2000},
 };
+
+// The global state variable
 static enum ux_state _state = select_parameter;
 
-void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void)
-{
-    // 74 cycles to get to this point from timer event
+void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
     mT2ClearIntFlag();
     
+    // If the state is playing, we generate the signal as instruction
     if( _state == playing ) {
         if(main_cnt == 100*syl_rpt_int*(num_of_syllables-syll_cnt) && syll_cnt != 0 ) {
              // just start the next syllable
@@ -161,25 +167,25 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void)
             env_val = ENV_ZERO;
         } 
     } else if( _state == test_mode ) {
-        env_val = ENV_FULL; // always be full
+        env_val = ENV_FULL; // always be full, we generate a simple sine wave
     } else {
+        // We are neither playing nor testing, so we mute the output signal
         env_val = ENV_ZERO;
     }
     
     // end SPI transaction from last interrupt cycle
     mPORTBSetBits(BIT_4);
-    
-    // === Channel A =============
     // CS low to start transaction
     mPORTBClearBits(BIT_4); // start transaction
+    // Use Channel A as output
     WriteSPI2( DAC_config_chan_A | (DAC_data + 2048));
     // main DDS phase
-    phase_accum_main += phase_incr_main  ;
-    //sine_index = phase_accum_main>>24 ;
+    phase_accum_main += phase_incr_main;
+    // Pick a phase value from table and modulate the signal with envelope
     DAC_data = env_val*cos_table[phase_accum_main>>28];
-    isr_time = ReadTimer2() ; // - isr_time;
-    
+    // increase the main counter
     main_cnt++;
+    // This means we finish a whole chirp
     if( main_cnt == chirp_repeat_interval*100 ) {
         // reset the system state
         main_cnt = 0;
@@ -189,16 +195,18 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void)
 
 // string buffer
 char buffer[60];
+
+// Used for debouncing
 static int keyinsert[17]= {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 static int keyvalue[17]= {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-// === thread structures ============================================
-// thread control structs
-// note that UART input and output are threads
+
 static struct pt pt_timer, pt_color, pt_anim, pt_key, pt_key_alt ;
 
 // system 1 second interval tick
-int sys_time_seconds ;
+int sys_time_seconds;
 int j=0;
+
+// Actually similar to the previous parameters, this is for moving data around
 int chirp_interval=0;
 int number_sysllables=0;
 int syllable_duration=0;
@@ -212,14 +220,14 @@ int burst_frequency=0;
 static PT_THREAD (protothread_timer(struct pt *pt))
 {
     PT_BEGIN(pt);
-     tft_setCursor(0, 0);
-     tft_setTextColor(ILI9340_WHITE);  tft_setTextSize(1);
-     tft_writeString("Time in seconds since boot\n");
-      while(1) {
+    tft_setCursor(0, 0);
+    tft_setTextColor(ILI9340_WHITE);  tft_setTextSize(1);
+    tft_writeString("Time in seconds since boot\n");
+    while(1) {
         // yield time 1 second
         PT_YIELD_TIME_msec(1000) ;
         sys_time_seconds++ ;
-        
+
         // draw sys_time
         tft_fillRoundRect(0,10, 100, 14, 1, ILI9340_BLACK);// x,y,w,h,radius,color
         tft_setCursor(0, 10);
@@ -227,178 +235,22 @@ static PT_THREAD (protothread_timer(struct pt *pt))
         sprintf(buffer,"%d", sys_time_seconds);
         tft_writeString(buffer);
         // NEVER exit while
-      } // END WHILE(1)
+    } // END WHILE(1)
   PT_END(pt);
 } // timer thread
 
-
-static PT_THREAD (protothread_key(struct pt *pt))
-{
-    PT_BEGIN(pt);
-    static int keypad, i, pattern, flag;
-    // order is 0 thru 9 then * ==10 and # ==11
-    // no press = -1
-    // table is decoded to natural digit order (except for * and #)
-    // 0x80 for col 1 ; 0x100 for col 2 ; 0x200 for col 3
-    // 0x01 for row 1 ; 0x02 for row 2; etc
-    static int keytable[12]={0x108, 0x81, 0x101, 0x201, 0x82, 0x102, 0x202, 0x84, 0x104, 0x204, 0x88, 0x208};
-    // init the keypad pins A0-A3 and B7-B9
-    // PortA ports as digital outputs
-    mPORTASetPinsDigitalOut(BIT_0 | BIT_1 | BIT_2 | BIT_3);    //Set port as output
-    // PortB as inputs
-    mPORTBSetPinsDigitalIn(BIT_7 | BIT_8 | BIT_9);    //Set port as input
-tft_setCursor(10, 100);
-  tft_setTextColor(ILI9340_GREEN);  tft_setTextSize(1);
-  tft_writeString("Push * to cancel");
-  
-  tft_setCursor(10, 120);
-  tft_setTextColor(ILI9340_GREEN);  tft_setTextSize(1);
-  tft_writeString("Push # to start/stop");
-  for(i=0;i<5;i++){
-    tft_setCursor(10, 200+ i*15);
-    tft_setTextColor(ILI9340_WHITE);  tft_setTextSize(1);
-    if(i==0)tft_writeString("chirp repeat interval");
-    if(i==1)tft_writeString("number of syllables");
-    if(i==2)tft_writeString("syllable duration");
-    if(i==3)tft_writeString("syllable repeat interval");
-    if(i==4)tft_writeString("burst frequency");
-        }
-      while(1) {
-
-        // read each row sequentially
-        mPORTAClearBits(BIT_0 | BIT_1 | BIT_2 | BIT_3);
-        pattern = 1; mPORTASetBits(pattern);
-        
-        // yield time
-        PT_YIELD_TIME_msec(30);
-   
-        for (i=0; i<4; i++) {
-            keypad  = mPORTBReadBits(BIT_7 | BIT_8 | BIT_9);
-            if(keypad!=0) {keypad |= pattern ; break;}
-            mPORTAClearBits(pattern);
-            pattern <<= 1;
-            mPORTASetBits(pattern);
-        }
-        // search for keycode
-        if (keypad > 0){ // then button is pushed
-            for (i=0; i<12; i++){
-                if (keytable[i]==keypad) break;
-            }
-        }
-        else i = -1; // no button pushed
-        
-        if(i != -1 && flag ==0){
-            keyinsert[j]= i ;
-            if(keyinsert[j]<10){keyvalue[j]=keyinsert[j];}
-            j++;
-            if(j>16) j=0;
-            flag =1;
-            tft_fillRoundRect(160,200, 200, 100, 1, ILI9340_BLACK);// x,y,w,h,radius,color
-    //        if(keyinsert[j]<10){keyvalue[j]=keyinsert[j];}
-        } 
-        
-        if( i == -1) {
-            flag =0;
-        }
-        
-        if (keyinsert[j-1]==10)   // * button   cancel all information
-        {
-            for(i=0;i<17;i++){ keyvalue[i]=0;
-            keyinsert[i]=0;}
-            j=0;
-            tft_fillRoundRect(160,200, 200, 100, 1, ILI9340_BLACK);// x,y,w,h,radius,color
-
-        }
-        // draw key number
-        
-       
-        
-        if( keyinsert[j-1]==11)   // # button    start/Stop
-        {
-            
-            chirp_interval = keyvalue[0]*1000 + keyvalue[1]*100 + keyvalue[2] *10 + keyvalue[3] *1 ; 
-            number_sysllables = keyvalue[4]*100 + keyvalue[5] *10 + keyvalue[6] *1 ; 
-            syllable_duration = keyvalue[7]*100 + keyvalue[8] *10 + keyvalue[9] *1 ; 
-            syllable_repeat = keyvalue[10]*100 + keyvalue[11] *10 + keyvalue[12] *1 ; 
-            burst_frequency = keyvalue[13]*1000 + keyvalue[14] *100 + keyvalue[15] *10+ keyvalue[16] *1 ; 
-         
-           chirp_repeat_interval = chirp_interval;
-           num_of_syllables = number_sysllables;
-           syll_cnt = number_sysllables;
-           syl_duration = syllable_duration;
-           syl_rpt_int = syllable_repeat;
-           burst_freq = burst_frequency;
-           Fs = (100.0/(burst_freq*TM2_DURA));
-           phase_incr_main=100.0*two32/Fs;
-        }
-        
-        
-        int a=0; 
-        int b=0;
-        for(i=0;i<17;i++){
-            if(i<4){a=0;b=0;}
-            else if(i<7){a=1;b=4;}
-            else if(i<10){a=2;b=7;}
-            else if(i<13){a=3;b=10;}
-            else if(i<17){a=4;b=13;}
-            tft_setCursor(160 + (i-b)*15, 200 + a*15);
-            tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
-            if (keyinsert[i]<10)
-            {sprintf(buffer,"%d",keyinsert[i]);
-             tft_writeString(buffer);}
-            if(i==(j-1)){  
-            tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
-            sprintf(buffer,"%d",keyinsert[j]);
-            tft_writeString(buffer);
-            }
-        }
-            
-        
-            tft_fillRoundRect(10,45, 200, 100, 1, ILI9340_BLACK);// x,y,w,h,radius,color
-            tft_setCursor(20,45);
-            tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
-            sprintf(buffer,"%d",chirp_repeat_interval);
-            tft_writeString(buffer);
-            
-            tft_setCursor(20,65);
-            tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
-            sprintf(buffer,"%d",num_of_syllables);
-            tft_writeString(buffer);
-            
-            tft_setCursor(20,85);
-            tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
-            sprintf(buffer,"%d",syl_duration);
-            tft_writeString(buffer);
-                    
-            tft_setCursor(20,105);
-            tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
-            sprintf(buffer,"%d",syl_rpt_int);
-            tft_writeString(buffer);
-            
-                        
-            tft_setCursor(20,125);
-            tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
-            sprintf(buffer,"%d",burst_freq);
-            tft_writeString(buffer);
-
-       
-        
-       //  NEVER exit while
-        
-      } // END WHILE(1)
-  PT_END(pt);
-} // keypad thread
-
-
-
+// This is the thread handles the keyscan and user interface
 static PT_THREAD (protothread_key_alt(struct pt *pt)) {
     PT_BEGIN(pt);
+    // Which parameter do we select
     static int parameter_id = 0;
+    // Which number are we editing
     static int digit_id = 0;
+    // Some flags
     static int flag = 0, digit_need_update = 0;
-    
     static int last_key = -1;
     static int keypad, i, pattern, d, left, p, key_scan;;
+    // Scan code
     static int keytable[12]={0x108, 0x81, 0x101, 0x201, 0x82, 0x102, 0x202, 0x84, 0x104, 0x204, 0x88, 0x208};
     static int key_cnt[12] ={0};
     // init the keypad pins A0-A3 and B7-B9
@@ -407,6 +259,7 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
     // PortB as inputs
     mPORTBSetPinsDigitalIn(BIT_7 | BIT_8 | BIT_9);    //Set port as input
     
+    // We initally print the numbers
     for( i=0; i<5; i++ ) {
         int digits_cnt = paras[i].digits;
         int t = paras[i].val;
@@ -438,6 +291,7 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
         }
         else key_scan = -1; // no button pushed
         
+        // Do the decounce and transform the keycode to a different scheme
         int key_code = -1;
         if(key_scan != -1 && flag == 0) {
             flag = 1;
@@ -461,21 +315,29 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
         }
         
         int power = 1;
+        // User interface FSM
+        // Here keycode is changed
+        //  0  1  2
+        //  3  4  5
+        //  6  7  8
+        //  9 10 11
         switch( _state ) {
+            // State for select parameter
             case select_parameter:
-                if( key_code == 1 ) {
+                if( key_code == 1 ) { // 1 for up
+                    // clear the digit bar
                     tft_fillRoundRect(145,155+parameter_id*20, 
                             100, 4, 1, ILI9340_BLACK);// x,y,w,h,radius,color
                     parameter_id --;
                     if( parameter_id < 0 ) parameter_id = 4;
-                } else if( key_code == 7 ) {
+                } else if( key_code == 7 ) { // 7 for down
                     tft_fillRoundRect(145,155+parameter_id*20, 
                             100, 4, 1, ILI9340_BLACK);// x,y,w,h,radius,color
                     parameter_id ++;
                     if( parameter_id > 4 ) parameter_id = 0;
-                } else if( key_code == 4 ) {
+                } else if( key_code == 4 ) { // 4 for confirm
                     _state = set_parameter;
-                } else if( key_code == 9 ) {
+                } else if( key_code == 9 ) { // 9 for playing
                     _state = playing;
                     tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
                     chirp_interval = paras[0].val;
@@ -484,6 +346,7 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
                     syllable_repeat = paras[3].val;
                     burst_frequency = paras[4].val;
 
+                    // Copy the values
                     chirp_repeat_interval = chirp_interval;
                     num_of_syllables = number_sysllables;
                     syll_cnt = number_sysllables;
@@ -493,6 +356,7 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
                     Fs = (100.0/(burst_freq*TM2_DURA));
                     phase_incr_main=100.0*two32/Fs;
                 } else if( key_scan == 0 ) {
+                    // Every time we press the key 0, we enter the test_mode
                     tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
                     _state = test_mode;
                     burst_freq = paras[4].val;
@@ -501,46 +365,56 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
                 }
                 break;
             case set_parameter:
+                // we first calculate the power of 10
                 for( p=0; p<paras[parameter_id].digits-digit_id-1; p++ ) {
                     power *= 10;
                 }
                 if( key_code == 3 ) {
+                    // 3 for left
                     digit_id --;
                     if( digit_id < 0 ) digit_id = paras[parameter_id].digits-1;
                 } else if( key_code == 5 ) {
+                    // 5 for right
                     digit_id ++;
                     if( digit_id > paras[parameter_id].digits-1 ) digit_id = 0;
                 } else if( key_code == 4 ) {
+                    // 4 for go back to select_parameter mode
                     _state = select_parameter;
                     digit_id = 0;
                 } else if( key_code == 1 ) {
+                    // 1 for increase the specific power, we will check if the value exceed the maximum value
                     if( paras[parameter_id].val + power <= paras[parameter_id].max_val ) {
                         paras[parameter_id].val += power;
                         digit_need_update = 1;
                     }
                 } else if( key_code == 7 ) {
+                    // 7 for decrease
                     if( paras[parameter_id].val - power >= paras[parameter_id].min_val ) {
                         paras[parameter_id].val -= power;
                         digit_need_update = 1;
                     }
                 } else if( key_scan == 0 ) {
+                    // same logic as the previous state
                     tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
                     _state = test_mode;
-                    burst_freq = TEST_MODE_FREQ;
+                    burst_freq = paras[4].val;;
                     Fs = (100.0/(burst_freq*TM2_DURA));
                     phase_incr_main=100.0*two32/Fs;
                 }
                 break;
             case playing:
                 if( key_code == 11 ) {
+                    // press # to stop
                     _state = select_parameter;
                     tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
                 } else if( key_scan == 0 ) {
+                    // press 0 to enter test_mode
                     _state = test_mode;
                     tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
                 }
                 break;
             case test_mode:
+                // if we are in test_mode, we will detect whether key 0 is released
                 if( key_scan != 0 ) {
                     // jump back to normal mode asap
                     tft_fillRoundRect(50, 40, 100, 20, 1, ILI9340_BLACK);
@@ -552,6 +426,7 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
         }
         tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
         tft_setCursor(50, 40);
+        // print the state
         if( _state == test_mode ) {
             sprintf(buffer, "testing");
             tft_writeString(buffer);
@@ -565,12 +440,7 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
             tft_writeString(buffer);
         }
         
-//        tft_fillRoundRect(50, 70, 140, 15, 1, ILI9340_BLACK);// x,y,w,h,radius,color
-//        tft_setTextColor(ILI9340_WHITE); tft_setTextSize(2);
-//        tft_setCursor(50, 70);
-//        sprintf(buffer, "key=%d@%d %d %d",last_key,key_cnt[last_key],parameter_id,digit_id); 
-//        tft_writeString(buffer);
-        
+        // print the parameters' name
         for( i=0; i<5; i++ ) {
             if ( i == parameter_id ) {
                 tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
@@ -582,6 +452,7 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
             tft_writeString(buffer);
         }
         
+        // display digits
         for( i=0; i<5; i++ ) {
             if( _state == set_parameter && parameter_id == i ) {                
                 if(digit_need_update == 1) {
@@ -603,69 +474,50 @@ static PT_THREAD (protothread_key_alt(struct pt *pt)) {
 
 // === Main  ======================================================
 void main(void) {
- SYSTEMConfigPerformance(PBCLK);
-  
-  ANSELA = 0; ANSELB = 0; CM1CON = 0; CM2CON = 0;
+    SYSTEMConfigPerformance(PBCLK);
+    ANSELA = 0; ANSELB = 0; CM1CON = 0; CM2CON = 0;
+    PT_setup();
 
-  // === config threads ==========
-  // turns OFF UART support and debugger pin
-  PT_setup();
+    PT_INIT(&pt_timer);
+    PT_INIT(&pt_key_alt);
 
-  // === setup system wide interrupts  ========
+    // init the display
+    tft_init_hw();
+    tft_begin();
+    tft_fillScreen(ILI9340_BLACK);
+    //240x320 vertical display
+    tft_setRotation(0); // Use tft_setRotation(1) for 320x240
 
-    
-   
-  // init the threads
-  PT_INIT(&pt_timer);
-//  PT_INIT(&pt_color);
-//  PT_INIT(&pt_anim);
-//  PT_INIT(&pt_key);
-  PT_INIT(&pt_key_alt);
+    // seed random color
+    srand(1);
 
-  // init the display
-  tft_init_hw();
-  tft_begin();
-  tft_fillScreen(ILI9340_BLACK);
-  //240x320 vertical display
-  tft_setRotation(0); // Use tft_setRotation(1) for 320x240
+    int i;
 
-  // seed random color
-  srand(1);
-  
-  int i;
-  
-//  
-  
-  // round-robin scheduler for threads
-  
-  
+    // Enable timer2
     INTEnableSystemMultiVectoredInt();
+    // PERIOD is 400 se our interrupt will triggered every 10us
     OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, PERIOD);
     ConfigIntTimer2(T2_INT_ON | T2_INT_PRIOR_2);
     mT2ClearIntFlag();
-    
-    
+
+    // Enable SPI2    
     PPSOutput(2, RPB5, SDO2);
     mPORTBSetPinsDigitalOut(BIT_4);
     mPORTBSetBits(BIT_4);
     SpiChnOpen(spiChn, SPI_OPEN_ON | SPI_OPEN_MODE16 | SPI_OPEN_MSTEN | SPI_OPEN_CKE_REV , spiClkDiv);
     
-//    int i;
+    // Generate the sine and cosine table
     for (i = 0; i < sine_table_size; i++){
          cos_table[i] = (int)(2047*cos((float)i*6.283/(float)sine_table_size));
          sin_table[i] = (int)(2047*sin((float)i*6.283/(float)sine_table_size));
     }
-    
-    
-    
-  while (1){
+       
+    // Start scheduling
+    while (1) {
         PT_SCHEDULE(protothread_timer(&pt_timer));
- //     PT_SCHEDULE(protothread_color(&pt_color));
- //     PT_SCHEDULE(protothread_anim(&pt_anim));
-//      PT_SCHEDULE(protothread_key(&pt_key));
         PT_SCHEDULE(protothread_key_alt(&pt_key_alt));
-      }
-  } // main
+    }
+} // main
 
 // === end  ======================================================
 

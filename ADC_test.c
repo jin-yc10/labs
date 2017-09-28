@@ -68,12 +68,12 @@ static PT_THREAD (protothread_adc(struct pt *pt))
         // convert to fixed voltage
         Vfix = multfix16(int2fix16(adc_9), ADC_scale) ;
         
-        tft_fillRoundRect(300, position, 5, 40, 1, ILI9340_YELLOW);
-        tft_fillRoundRect(300, 0, 5, position, 1, ILI9340_BLACK);
-        tft_fillRoundRect(300, (position+40), 5, 240-(position+40), 1, ILI9340_BLACK);
+
+        tft_fillRoundRect(300, 0, 5, (position), 1, ILI9340_BLACK);
+        tft_fillRoundRect(300, (position+20), 5, 240-(position+20), 1, ILI9340_BLACK);
+        tft_fillRoundRect(300, position, 5, 20, 1, ILI9340_YELLOW);
         // print raw ADC, floating voltage, fixed voltage
-        
-        
+
         // NEVER exit while
       } // END WHILE(1)
   PT_END(pt);
@@ -104,7 +104,7 @@ void main(void) {
   ///////////////////////////////////////////////////////
     
   // init the threads
-
+  
   PT_INIT(&pt_adc);
 
   // init the display
@@ -113,10 +113,11 @@ void main(void) {
   tft_fillScreen(ILI9340_BLACK);
   //240x320 vertical display
   tft_setRotation(1); // Use tft_setRotation(1) for 320x240
-
+  
   // seed random color
   srand(1);
-
+  tft_fillRoundRect(240, (240-60), 5, 60, 1, ILI9340_YELLOW);
+  tft_fillRoundRect(240, 0, 5, 60, 1, ILI9340_YELLOW);
   // round-robin scheduler for threads
   while (1){
 

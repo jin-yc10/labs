@@ -26,7 +26,6 @@ char buffer[60];
 static struct pt , pt_adc ;
 
 // system 1 second interval tick
-int sys_time_seconds ;
 
 // === the fixed point macros ========================================
 typedef signed int fix16 ;
@@ -53,27 +52,24 @@ static PT_THREAD (protothread_adc(struct pt *pt))
     ADC_scale = float2fix16(3.3/1023.0); //Vref/(full scale)
             
     while(1) {
-        // yield time 1 second
+        // ADC sample frequency should be 30 / second 
         PT_YIELD_TIME_msec(60);
-        
-        // read the ADC from pin 26 (AN9)
-        // read the first buffer position
         adc_9 = ReadADC10(0);   // read the result of channel 9 conversion from the idle buffer
         AcquireADC10(); // not needed if ADC_AUTO_SAMPLING_ON below
-
         // draw adc and voltage
         tft_fillRoundRect(0,100, 230, 15, 1, ILI9340_BLACK);// x,y,w,h,radius,color
         tft_setCursor(0, 100);
         tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
         // convert to voltage
         V = (float)adc_9 * 3.3 / 1023.0 ; // Vref*adc/1023
+	position = (float)adc_9 * 220.0 / 1023.0; //   postion on TFT
         // convert to fixed voltage
         Vfix = multfix16(int2fix16(adc_9), ADC_scale) ;
-        
+	
+	tft_fillRoundRect(300,position,5,20,ILI9340_WHITE)
         // print raw ADC, floating voltage, fixed voltage
         sprintf(buffer,"%d %6.3f %d.%03d", adc_9, V, fix2int16(Vfix), fix2int16(Vfix*1000)-fix2int16(Vfix)*1000);
         tft_writeString(buffer);
-        
         // NEVER exit while
       } // END WHILE(1)
   PT_END(pt);
@@ -92,7 +88,7 @@ void main(void) {
         
         #define PARAM3 ADC_CONV_CLK_PB | ADC_SAMPLE_TIME_5 | ADC_CONV_CLK_Tcy2 //ADC_SAMPLE_TIME_15| ADC_CONV_CLK_Tcy2
 
-	#define PARAM4	ENABLE_AN11_ANA // AN11
+	#define PARAM4	ENABLE_AN11_ANA // AN11 pin number should be RB13
 
 	#define PARAM5	SKIP_SCAN_ALL
 

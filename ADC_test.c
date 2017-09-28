@@ -1,15 +1,12 @@
 /*
- * File:        Read ADC
- * Author:      Bruce Land
+ * ADC interface with different logic here. 
  * 
- * Target PIC:  PIC32MX250F128B
+ * 
  */
 
 ////////////////////////////////////
 // clock AND protoThreads configure!
-// You MUST check this file!
 #include "config.h"
-// threading library
 #include "pt_cornell_1_1.h"
 
 ////////////////////////////////////
@@ -26,7 +23,7 @@ char buffer[60];
 // === thread structures ============================================
 // thread control structs
 // note that UART input and output are threads
-static struct pt pt_timer, pt_adc ;
+static struct pt , pt_adc ;
 
 // system 1 second interval tick
 int sys_time_seconds ;
@@ -42,29 +39,6 @@ typedef signed int fix16 ;
 #define sqrtfix16(a) (float2fix16(sqrt(fix2float16(a)))) 
 #define absfix16(a) abs(a)
 
-// === Timer Thread =================================================
-// update a 1 second tick counter
-static PT_THREAD (protothread_timer(struct pt *pt))
-{
-    PT_BEGIN(pt);
-     tft_setCursor(0, 0);
-     tft_setTextColor(ILI9340_WHITE);  tft_setTextSize(1);
-     tft_writeString("Time in seconds since boot\n");
-      while(1) {
-        // yield time 1 second
-        PT_YIELD_TIME_msec(1000) ;
-        sys_time_seconds++ ;
-        
-        // draw sys_time
-        tft_fillRoundRect(0,10, 100, 14, 1, ILI9340_BLACK);// x,y,w,h,radius,color
-        tft_setCursor(0, 10);
-        tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(1);
-        sprintf(buffer,"%d", sys_time_seconds);
-        tft_writeString(buffer);
-        // NEVER exit while
-      } // END WHILE(1)
-  PT_END(pt);
-} // timer thread
 
 // === ADC Thread =============================================
 // 
@@ -112,13 +86,13 @@ void main(void) {
   INTEnableSystemMultiVectoredInt();
 
 	CloseADC10();	// ensure the ADC is off before setting the configuration
-    #define PARAM1  ADC_FORMAT_INTG16 | ADC_CLK_AUTO | ADC_AUTO_SAMPLING_OFF //
+        #define PARAM1  ADC_FORMAT_INTG16 | ADC_CLK_AUTO | ADC_AUTO_SAMPLING_OFF //
 
 	#define PARAM2  ADC_VREF_AVDD_AVSS | ADC_OFFSET_CAL_DISABLE | ADC_SCAN_OFF | ADC_SAMPLES_PER_INT_1 | ADC_ALT_BUF_OFF | ADC_ALT_INPUT_OFF
         
-    #define PARAM3 ADC_CONV_CLK_PB | ADC_SAMPLE_TIME_5 | ADC_CONV_CLK_Tcy2 //ADC_SAMPLE_TIME_15| ADC_CONV_CLK_Tcy2
+        #define PARAM3 ADC_CONV_CLK_PB | ADC_SAMPLE_TIME_5 | ADC_CONV_CLK_Tcy2 //ADC_SAMPLE_TIME_15| ADC_CONV_CLK_Tcy2
 
-	#define PARAM4	ENABLE_AN11_ANA // pin 24
+	#define PARAM4	ENABLE_AN11_ANA // AN11
 
 	#define PARAM5	SKIP_SCAN_ALL
 
@@ -130,7 +104,6 @@ void main(void) {
   ///////////////////////////////////////////////////////
     
   // init the threads
-  PT_INIT(&pt_timer);
   PT_INIT(&pt_adc);
 
   // init the display
@@ -145,7 +118,6 @@ void main(void) {
 
   // round-robin scheduler for threads
   while (1){
-      PT_SCHEDULE(protothread_timer(&pt_timer));
       PT_SCHEDULE(protothread_adc(&pt_adc));
       }
   } // main

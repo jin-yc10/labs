@@ -20,8 +20,19 @@
 #define	SYS_FREQ 40000000
 // main ////////////////////////////
 static unsigned int sys_time_seconds;
-static struct pt pt_dynamic, pt_adc;
+static struct pt pt_dynamic, pt_adc, pt_key;
 char buffer[60];
+
+#define USE_DRAW_CIRCLE 1
+#define USE_DRAW_RECT 0
+
+#if USE_DRAW_CIRCLE
+#define DRAWCIRCLE(x,y,w,h,r,color) tft_drawCircle(x,y,r,color)
+#elif USE_DRAW_RECT
+#define DRAWCIRCLE(x,y,w,h,r,color) tft_fillRoundRect(x,y,w,h,r,color)
+#else
+#define DRAWCIRCLE(x,y,w,h,r,color) {}
+#endif
 
 // Sound
 #define dmaChn 0
@@ -59,7 +70,9 @@ typedef signed int fix16 ;
 #define PI 3.1415926f
 #define W 320
 #define H 240
-#define N 30
+//#define N 30
+#define MAX_N 80
+static unsigned short N = 70;
 
 static int score = 0;
 
@@ -92,7 +105,7 @@ fix16 BOARD_Y_BOT_BOT = int2fix16(240);
 fix16 DRAG = float2fix16(0.999f);
 #endif
 
-struct ball balls[N];
+struct ball balls[MAX_N];
 //void tft_fillRoundRect(short x, short y, short w,
 //				 short h, short r, unsigned short color)
 
@@ -107,6 +120,30 @@ static unsigned short rand_color() {
 #define PADDLE_X 20
 #define PADDLE_WIDTH 60
 static unsigned int paddle_y = 90;
+static unsigned char key_flag = 0;
+
+static PT_THREAD (key(struct pt *pt)){
+    PT_BEGIN(pt);
+    static unsigned int temp = 0; 
+    while (1){
+        PT_YIELD_TIME_msec(15);
+        if ( mPORTAReadBits(BIT_1) == 0 ){
+            if ( temp == 0) {key_flag =1;
+            temp = 1;}
+        }
+        else{
+            if ( temp == 1) {key_flag =0;
+            temp = 0;}
+        }
+        tft_setCursor(100, 100);
+        tft_fillRoundRect(100 ,100, 160, 10, 1, ILI9340_BLACK);
+        tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2);
+        sprintf(buffer, "flag: %d %d %d", mPORTAReadBits(BIT_1), key_flag, temp);
+        tft_writeString(buffer);
+    }
+    
+    PT_END(pt);
+}
 
 #ifndef USE_FIX_POINT
 static PT_THREAD (fn_dynamic(struct pt *pt)) {
@@ -206,160 +243,211 @@ static PT_THREAD (fn_dynamic(struct pt *pt)) {
     static unsigned int init_cnt = 0;
     static unsigned int last_time = 0;
     static int i, j;
-    static unsigned int now, dt = 0, cal_t = 0;
-    
-    for( i=0; i<N; i++ ) {
-        struct ball* b1 = &balls[i];
-        b1->needs_recycle = 1;
-        b1->COLOR = rand_color();
-    }
-    
+    static unsigned int now, start_time, dt = 0, cal_t = 0;
+   
+    static unsigned int temp = 0; 
+    static unsigned char state = 0; // 0 Begin, 1 Game, 2 End
+    static unsigned char key_code = 0;
+    tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);    
+    tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
+    sprintf(buffer, "BEGINNING");
+    tft_writeString(buffer);
     while(1) {
-        PT_YIELD_TIME_msec(60-cal_t);
-//        if( init_cnt < N ) {
-//			struct ball* b1 = &balls[init_cnt];
-//			b1->rx = float2fix16( 320.0f);
-//			b1->ry = float2fix16( 120.0f);
-//			b1->hit_counter = HIT_COUNT;
-//			b1->vx = float2fix16(-5.0f*sin((float)init_cnt/N*PI));
-//			b1->vy = float2fix16(5.0f*cos((float)init_cnt/N*PI));
-//			b1->is_init = 1;
-//            b1->COLOR = rand_color();
-//			init_cnt++;
-//		}
-        for( i=0; i<N; i++ ) {
-            struct ball* b1 = &balls[i];
-            if ( b1->needs_recycle ) {
-                b1->needs_recycle = 0;
-                b1->rx = float2fix16( 320.0f);
-    			b1->ry = float2fix16( 120.0f);
-                b1->hit_counter = HIT_COUNT;
-                b1->vx = float2fix16(-5.0f*sin((float)init_cnt/N*PI));
-                b1->vy = float2fix16(5.0f*cos((float)init_cnt/N*PI));
-                b1->is_init = 1;
-                init_cnt++;
-                if( init_cnt > N-1 ) {
-                    init_cnt = 0;
+        key_code = 0;
+        if( mPORTAReadBits(BIT_1)==0 && temp==0 ) {
+            temp = 1;
+            key_code = 1;
+        }
+        if( mPORTAReadBits(BIT_1)==0x02 ) {
+            temp = 0;
+        }        
+        
+        if( key_code ) { 
+            if( state == 0 ) {// BEGIN
+                state = 1;
+                for( i=0; i<MAX_N; i++ ) {
+                    struct ball* b1 = &balls[i];
+                    b1->needs_recycle = 1;
+                    b1->is_init = 0;
+                    b1->COLOR = rand_color();
                 }
-                break;
+                tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);  
+                start_time = PT_GET_TIME();
+            } else if( state == 1) { // GAME
+                state = 0;
+                tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);    
+                tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
+                sprintf(buffer, "BEGINNING");
+                tft_writeString(buffer);
+            } else if( state == 2) { // END
+                OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, 600);
+                for (i=0; i<9; i++){
+                    DmaChnEnable(dmaChn);
+                    PT_YIELD_TIME_msec(100);
+                   
+                }
+                state = 0;
+                tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);
             }
         }
-        now = PT_GET_TIME();
-        dt = now - last_time; last_time = now;
-        tft_setCursor(0, 0);
-        tft_fillRoundRect(0 ,0, 120, 20, 1, ILI9340_BLACK);
-        tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2);
-        sprintf(buffer, "%d,%d,%d", dt, cal_t, score);
-        tft_writeString(buffer);
-#if 1
-        for( i=0; i<N; i++) {
-			struct ball* b1 = &balls[i];
-			for( j=i; j<N; j++) {
-				struct ball* b2 = &balls[j];
-				fix16 dx = b1->rx - b2->rx;
-				fix16 dy = b1->ry - b2->ry;
-				if( dx < MIN_DIST_PLUS && MIN_DIST_MINUS < dx && 
-                    dy < MIN_DIST_PLUS && MIN_DIST_MINUS < dy ) {
-					fix16 mod_rij = multfix16(dx,dx)+multfix16(dy,dy);
-					if( mod_rij == 0 && b1->hit_counter == 0) {
-						// avoid divided by zero
-						fix16 swp;
-						swp = b1->vx;
-						b1->vx = b2->vx;
-						b2->vx = swp;
-						swp = b1->vy;
-						b1->vy = b2->vy;
-						b2->vy = swp;
-					}
-					else if( mod_rij < TWOxBALL_RAD_SQR && b1->hit_counter == 0 ) {
-						fix16 vij_x = b1->vx - b2->vx;
-						fix16 vij_y = b1->vy - b2->vy;
-						fix16 rij_times_vij = multfix16(dx,vij_x)+multfix16(dy,vij_y);
-						fix16 alpha = divfix16(rij_times_vij,mod_rij);
-						fix16 minus_dvix = multfix16(alpha,dx);
-						fix16 minus_dviy = multfix16(alpha,dy);
-						b1->vx -= minus_dvix;
-						b1->vy -= minus_dviy;
-						b2->vx += minus_dvix;
-						b2->vy += minus_dviy;
-						b1->hit_counter = HIT_COUNT;
-						b2->hit_counter = HIT_COUNT;
-					} else if( b1->hit_counter > 0 ) {
-						b1->hit_counter --;
-					}
-				}
-			}
-		}
-#endif
-        fix16 beta = float2fix16(0.01f*dt);
-        for( i=0; i<N; i++) {
-			struct ball* b1 = &balls[i];
-            tft_fillRoundRect(
-                    fix2int16(b1->rx), fix2int16(b1->ry), 
-                    2*BALL_RADIUS, 2*BALL_RADIUS, 2, ILI9340_BLACK);
-			if( b1->is_init == 0 ) continue;
-            if(BOARD_X > b1->rx && BOARD_X < b1->rx + multfix16(beta, b1->vx) &&
-               (  0 < b1->ry && b1->ry < BOARD_Y_TOP ||
-                  BOARD_Y_BOT_TOP < b1->ry && b1->ry < BOARD_Y_BOT_BOT )) {
-                b1->needs_recycle = 1;
-                tft_fillRoundRect(
-                    fix2int16(b1->rx), fix2int16(b1->ry), 
-                    2*BALL_RADIUS, 2*BALL_RADIUS, 2, ILI9340_BLACK);
-                DmaChnEnable(dmaChn); 
-                score++;
-            } else if(( BOARD_X < b1->rx && 
-                        BOARD_X > b1->rx + multfix16(beta, b1->vx) &&
-                    (  0 < b1->ry && b1->ry < BOARD_Y_TOP ||
-                    BOARD_Y_BOT_TOP < b1->ry && b1->ry < BOARD_Y_BOT_BOT )) 
-                    ||
-                    int2fix16(PADDLE_X) < b1->rx && 
-                    int2fix16(PADDLE_X) > b1->rx + multfix16(beta, b1->vx) &&
-                    int2fix16(paddle_y) < b1->ry && 
-                    b1->ry < int2fix16(paddle_y+PADDLE_WIDTH)  ) {
-                b1->vx = -b1->vx;
-                b1->vy = multfix16(DRAG, b1->vy);
-                b1->rx += multfix16(beta, b1->vx);
-                b1->ry += multfix16(beta, b1->vy);
-                tft_fillRoundRect(
-                    fix2int16(b1->rx), fix2int16(b1->ry),
-                    2*BALL_RADIUS, 2*BALL_RADIUS, 2, b1->COLOR);
-            } else {
-                b1->rx += multfix16(beta, b1->vx);
-                b1->ry += multfix16(beta, b1->vy);
-                if( b1->rx < 0 ) {
-                    // DECREASE 1 SCORE
-                    score --;
+        if( state == 0 ) {
+            PT_YIELD_TIME_msec(60);
+        } else if( state == 1 ) {
+            PT_YIELD_TIME_msec(60-cal_t);
+            for( i=0; i<N; i++ ) {
+                struct ball* b1 = &balls[i];
+                if ( b1->needs_recycle ) {
+                    b1->needs_recycle = 0;
+                    b1->rx = float2fix16( 320.0f);
+                    b1->ry = float2fix16( 120.0f);
+                    b1->hit_counter = HIT_COUNT;
+                    b1->vx = float2fix16(-5.0f*sin((float)init_cnt/N*PI));
+                    b1->vy = float2fix16(5.0f*cos((float)init_cnt/N*PI));
+                    b1->is_init = 1;
+                    init_cnt++;
+                    if( init_cnt > N-1 ) {
+                        init_cnt = 0;
+                    }
+                    break;
+                }
+            }
+            now = PT_GET_TIME();
+            if(now - start_time > 50000) {
+                state = 2; // TIME EXCEED
+                tft_setCursor(40, 40);
+                tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);    
+                tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
+                sprintf(buffer, "END Score = %d", score);
+                tft_writeString(buffer);
+                tft_setCursor(40, 60);
+                sprintf(buffer, "Press Key to Begin", score);
+                tft_writeString(buffer);
+                continue;
+            }
+//            if(cal_t < 60) {
+//                N = (1 + now / 500);
+//                if(N>MAX_N) N=MAX_N;
+//            }
+
+            dt = now - last_time; last_time = now;
+            tft_setCursor(0, 0);
+            tft_fillRoundRect(0 ,0, 100, 10, 1, ILI9340_BLACK);
+            tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(1);
+            sprintf(buffer, "%d,%d,%d,%d", dt, cal_t, score, N);
+            tft_writeString(buffer);
+    #if 1
+            for( i=0; i<N; i++) {
+                struct ball* b1 = &balls[i];
+                for( j=i; j<N; j++) {
+                    struct ball* b2 = &balls[j];
+                    fix16 dx = b1->rx - b2->rx;
+                    fix16 dy = b1->ry - b2->ry;
+                    if( dx < MIN_DIST_PLUS && MIN_DIST_MINUS < dx && 
+                        dy < MIN_DIST_PLUS && MIN_DIST_MINUS < dy ) {
+                        fix16 mod_rij = multfix16(dx,dx)+multfix16(dy,dy);
+                        if( mod_rij == 0 && b1->hit_counter == 0) {
+                            // avoid divided by zero
+                            fix16 swp;
+                            swp = b1->vx;
+                            b1->vx = b2->vx;
+                            b2->vx = swp;
+                            swp = b1->vy;
+                            b1->vy = b2->vy;
+                            b2->vy = swp;
+                        }
+                        else if( mod_rij < TWOxBALL_RAD_SQR && b1->hit_counter == 0 ) {
+                            fix16 vij_x = b1->vx - b2->vx;
+                            fix16 vij_y = b1->vy - b2->vy;
+                            fix16 rij_times_vij = multfix16(dx,vij_x)+multfix16(dy,vij_y);
+                            fix16 alpha = divfix16(rij_times_vij,mod_rij);
+                            fix16 minus_dvix = multfix16(alpha,dx);
+                            fix16 minus_dviy = multfix16(alpha,dy);
+                            b1->vx -= minus_dvix;
+                            b1->vy -= minus_dviy;
+                            b2->vx += minus_dvix;
+                            b2->vy += minus_dviy;
+                            b1->hit_counter = HIT_COUNT;
+                            b2->hit_counter = HIT_COUNT;
+                        } else if( b1->hit_counter > 0 ) {
+                            b1->hit_counter --;
+                        }
+                    }
+                }
+            }
+    #endif
+            fix16 beta = float2fix16(0.01f*dt);
+            for( i=0; i<N; i++) {
+                struct ball* b1 = &balls[i];            
+                DRAWCIRCLE(
+                        fix2int16(b1->rx), fix2int16(b1->ry), 
+                        2*BALL_RADIUS, 2*BALL_RADIUS, 2, ILI9340_BLACK);
+                if( b1->is_init == 0 ) continue;
+                if(BOARD_X > b1->rx && BOARD_X < b1->rx + multfix16(beta, b1->vx) &&
+                   (  0 < b1->ry && b1->ry < BOARD_Y_TOP ||
+                      BOARD_Y_BOT_TOP < b1->ry && b1->ry < BOARD_Y_BOT_BOT )) {
                     b1->needs_recycle = 1;
-                    tft_fillRoundRect(
-                    fix2int16(b1->rx), fix2int16(b1->ry), 
-                    2*BALL_RADIUS, 2*BALL_RADIUS, 2, ILI9340_BLACK);
-                    continue;
-                } else if( b1->rx > FIX16_W ) {
+                    DRAWCIRCLE(
+                        fix2int16(b1->rx), fix2int16(b1->ry), 
+                        2*BALL_RADIUS, 2*BALL_RADIUS, 2, ILI9340_BLACK);
+                    OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, 800);
+                    DmaChnEnable(dmaChn); 
+                    score++;
+                } else if(( BOARD_X < b1->rx && 
+                            BOARD_X > b1->rx + multfix16(beta, b1->vx) &&
+                        (  0 < b1->ry && b1->ry < BOARD_Y_TOP ||
+                        BOARD_Y_BOT_TOP < b1->ry && b1->ry < BOARD_Y_BOT_BOT )) 
+                        ||
+                        int2fix16(PADDLE_X) < b1->rx && 
+                        int2fix16(PADDLE_X) > b1->rx + multfix16(beta, b1->vx) &&
+                        int2fix16(paddle_y) < b1->ry && 
+                        b1->ry < int2fix16(paddle_y+PADDLE_WIDTH)  ) {
                     b1->vx = -b1->vx;
                     b1->vy = multfix16(DRAG, b1->vy);
-                    b1->rx = FIX16_W;
-                    b1->vy = multfix16(DRAG, b1->vy);
+                    b1->rx += multfix16(beta, b1->vx);
+                    b1->ry += multfix16(beta, b1->vy);
+                    DRAWCIRCLE(
+                        fix2int16(b1->rx), fix2int16(b1->ry),
+                        2*BALL_RADIUS, 2*BALL_RADIUS, 2, b1->COLOR);
+                } else {
+                    b1->rx += multfix16(beta, b1->vx);
+                    b1->ry += multfix16(beta, b1->vy);
+                    if( b1->rx < 0 ) {
+                        // DECREASE 1 SCORE
+                        score --;
+                        b1->needs_recycle = 1;
+                        DRAWCIRCLE(
+                        fix2int16(b1->rx), fix2int16(b1->ry), 
+                        2*BALL_RADIUS, 2*BALL_RADIUS, 2, ILI9340_BLACK);
+                        OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, 300);
+                        DmaChnEnable(dmaChn); 
+                        continue;
+                    } else if( b1->rx > FIX16_W ) {
+                        b1->vx = -b1->vx;
+                        b1->vy = multfix16(DRAG, b1->vy);
+                        b1->rx = FIX16_W;
+                        b1->vy = multfix16(DRAG, b1->vy);
+                    }
+                    if( b1->ry < 0 ) {
+                        b1->vy = -b1->vy;
+                        b1->vx = multfix16(DRAG, b1->vx);
+                        b1->ry = 0;
+                    } else if( b1->ry > FIX16_H) {
+                        b1->vy = -b1->vy;
+                        b1->vx = multfix16(DRAG, b1->vx);
+                        b1->ry = FIX16_H;
+                    }
+                    DRAWCIRCLE(
+                        fix2int16(b1->rx), fix2int16(b1->ry),
+                        2*BALL_RADIUS, 2*BALL_RADIUS, 2, b1->COLOR);
                 }
-                if( b1->ry < 0 ) {
-                    b1->vy = -b1->vy;
-                    b1->vx = multfix16(DRAG, b1->vx);
-                    b1->ry = 0;
-                } else if( b1->ry > FIX16_H) {
-                    b1->vy = -b1->vy;
-                    b1->vx = multfix16(DRAG, b1->vx);
-                    b1->ry = FIX16_H;
-                }
-                tft_fillRoundRect(
-                    fix2int16(b1->rx), fix2int16(b1->ry),
-                    2*BALL_RADIUS, 2*BALL_RADIUS, 2, b1->COLOR);
-            }
-            
-		} // END RENDER BALLS
-        tft_drawLine(80,0,80,60,ILI9340_GREEN);
-        tft_drawLine(80,180,80,240,ILI9340_GREEN);
-        tft_drawLine(20,0,20,240,ILI9340_BLACK);
-        tft_drawLine(20,paddle_y,20,paddle_y+PADDLE_WIDTH,ILI9340_RED);
-        cal_t = PT_GET_TIME() - now;
+
+            } // END RENDER BALLS
+            tft_drawLine(80,0,80,60,ILI9340_GREEN);
+            tft_drawLine(80,180,80,240,ILI9340_GREEN);
+            tft_drawLine(20,0,20,240,ILI9340_BLACK);
+            tft_drawLine(20,paddle_y,20,paddle_y+PADDLE_WIDTH,ILI9340_RED);
+            cal_t = PT_GET_TIME() - now;
+        }
     } // END WHILE(1)
     PT_END(pt);
 }
@@ -396,6 +484,7 @@ static PT_THREAD (protothread_adc(struct pt *pt))
         // convert to fixed voltage
         Vfix = multfix16(int2fix16(adc_9), ADC_scale) ;
         paddle_y = (unsigned int)position;
+        if (paddle_y > ( H - PADDLE_WIDTH) ) paddle_y = H -PADDLE_WIDTH;
 
 //        tft_fillRoundRect(300, 0, 5, (position), 1, ILI9340_BLACK);
 //        tft_fillRoundRect(300, (position+20), 5, 240-(position+20), 1, ILI9340_BLACK);
@@ -423,7 +512,7 @@ int main(void) {
     PT_setup();
     PT_INIT(&pt_dynamic);
     PT_INIT(&pt_adc);
-    
+    PT_INIT(&pt_key);
     tft_init_hw();
     tft_begin();
     tft_fillScreen(ILI9340_BLACK);
@@ -447,7 +536,7 @@ int main(void) {
     DmaChnSetTxfer(dmaChn, table, (void*)&SPI2BUF,5000*2, 2, 2);
     DmaChnSetEventControl(dmaChn, DMA_EV_START_IRQ(_TIMER_2_IRQ));
     DmaChnEnable(dmaChn);   
-    
+    mPORTASetPinsDigitalIn(BIT_1);    //Set port as input
     PPSOutput(2, RPB5, SDO2);
     PPSOutput(4, RPB10, SS2); 
     SpiChnOpen(SPI_CHANNEL2, 
@@ -459,6 +548,7 @@ int main(void) {
 	while(1) {		
         PT_SCHEDULE(fn_dynamic(&pt_dynamic));
         PT_SCHEDULE(protothread_adc(&pt_adc));
+//        PT_SCHEDULE(key(&pt_key));
  	}
 	return 0;
 }

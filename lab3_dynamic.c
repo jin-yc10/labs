@@ -17,19 +17,31 @@
 #include <math.h>
 #include "Sound_bomb.h"
 
-#define	SYS_FREQ 40000000
+//#define	SYS_FREQ 50000000
 // main ////////////////////////////
 static unsigned int sys_time_seconds;
 static struct pt pt_dynamic, pt_adc, pt_key;
 char buffer[60];
 
-#define USE_DRAW_CIRCLE 1
+#define USE_DRAW_CIRCLE 0
 #define USE_DRAW_RECT 0
-
-#if USE_DRAW_CIRCLE
+#define USE_DRAW_PIX 1
+#if USE_DRAW_CIRCLE 
 #define DRAWCIRCLE(x,y,w,h,r,color) tft_drawCircle(x,y,r,color)
 #elif USE_DRAW_RECT
 #define DRAWCIRCLE(x,y,w,h,r,color) tft_fillRoundRect(x,y,w,h,r,color)
+#elif USE_DRAW_PIX
+void draw_ball_pixel(short x0, short y0, short color) {
+    tft_drawFastHLine(x0, y0+1, 3, color);
+    tft_drawFastVLine(x0+1, y0, 3, color);
+    return;
+//    tft_drawPixel(x0  , y0, color);
+//    tft_drawPixel(x0  , y0+1, color);
+//    tft_drawPixel(x0  , y0-1, color);
+//    tft_drawPixel(x0+1, y0  , color);
+//    tft_drawPixel(x0-1, y0  , color);
+}
+#define DRAWCIRCLE(x,y,w,h,r,color) draw_ball_pixel(x,y,color)
 #else
 #define DRAWCIRCLE(x,y,w,h,r,color) {}
 #endif
@@ -66,13 +78,13 @@ typedef signed int fix16 ;
 // ==== DYNAMIC ====
 #define BALL_RADIUS 2.0f
 #define BALL_RADIUS_SQR 4.0f
-#define HIT_COUNT 1
+#define HIT_COUNT 4
 #define PI 3.1415926f
 #define W 320
 #define H 240
 //#define N 30
-#define MAX_N 80
-static unsigned short N = 70;
+#define MAX_N 250
+static unsigned short N = 250;
 
 static int score = 0;
 
@@ -103,6 +115,7 @@ fix16 BOARD_Y_TOP = int2fix16(60);
 fix16 BOARD_Y_BOT_TOP = int2fix16(180);
 fix16 BOARD_Y_BOT_BOT = int2fix16(240);
 fix16 DRAG = float2fix16(0.999f);
+const fix16 CLOSE_ENOUGH = int2fix16(2);
 #endif
 
 struct ball balls[MAX_N];
@@ -116,7 +129,6 @@ static unsigned short rand_color() {
     char x = (rand()%7);
     return color_table[x];
 }
-
 
 static void begin_page(void){
     tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);    
@@ -174,6 +186,17 @@ static PT_THREAD (key(struct pt *pt)){
     
     PT_END(pt);
 }
+
+static unsigned short freqs[7] = {
+  849,
+  757,
+  674,
+  637,
+  568,
+  506,
+  450
+};
+static unsigned char freq_idx = 0;
 
 #ifndef USE_FIX_POINT
 static PT_THREAD (fn_dynamic(struct pt *pt)) {
@@ -273,12 +296,15 @@ static PT_THREAD (fn_dynamic(struct pt *pt)) {
     static unsigned int init_cnt = 0;
     static unsigned int last_time = 0;
     static int i, j;
-    static unsigned int now, start_time, dt = 0, cal_t = 0;
+    static unsigned int now, start_time, dt = 0, cal_t = 1;
    
     static unsigned int temp = 0; 
     static unsigned char state = 0; // 0 Begin, 1 Game, 2 End
     static unsigned char key_code = 0;
-    tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);    
+//    tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);    
+    for (i=0; i<240; i++){
+    tft_drawFastHLine(0,i,320,ILI9340_BLACK);
+    }
     tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
     begin_page();
 
@@ -305,18 +331,12 @@ static PT_THREAD (fn_dynamic(struct pt *pt)) {
                 start_time = PT_GET_TIME();
             } else if( state == 1) { // GAME
                 state = 0;
-
                 begin_page();
-
             } else if( state == 2) { // END
-                OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, 600);
-                for (i=0; i<9; i++){
-                    DmaChnEnable(dmaChn);
-                    PT_YIELD_TIME_msec(100);
-                   
-                }
                 state = 0;
-                tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);
+                for (i=0; i<240; i++){
+                    tft_drawFastHLine(0,i,320,ILI9340_BLACK);
+                }
             }
         }
         if( state == 0 ) {
@@ -332,6 +352,8 @@ static PT_THREAD (fn_dynamic(struct pt *pt)) {
                     b1->hit_counter = HIT_COUNT;
                     b1->vx = float2fix16(-5.0f*sin((float)init_cnt/N*PI));
                     b1->vy = float2fix16(5.0f*cos((float)init_cnt/N*PI));
+//                    b1 -> vx =float2fix16(2.0);
+//                    b1 -> vy =float2fix16(2.0);
                     b1->is_init = 1;
                     init_cnt++;
                     if( init_cnt > N-1 ) {
@@ -353,16 +375,18 @@ static PT_THREAD (fn_dynamic(struct pt *pt)) {
                 tft_writeString(buffer);
                 continue;
             }
-//            if(cal_t < 60) {
-//                N = (1 + now / 500);
-//                if(N>MAX_N) N=MAX_N;
-//            }
-
             dt = now - last_time; last_time = now;
             tft_setCursor(0, 0);
-            tft_fillRoundRect(0 ,0, 100, 10, 1, ILI9340_BLACK);
+//            tft_fillRoundRect(0 ,0, 80, 10, 1, ILI9340_BLACK);
+            for (i=0; i<10; i++){
+                tft_drawFastHLine(0,i,80,ILI9340_BLACK);
+            }
             tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(1);
-            sprintf(buffer, "%d,%d,%d,%d", dt, cal_t, score, N);
+            sprintf(buffer, "%d,%d,%d,%d", 
+                    1000/cal_t, 
+                    N, 
+                    (now - start_time)/1000, 
+                    score);
             tft_writeString(buffer);
     #if 1
             for( i=0; i<N; i++) {
@@ -374,7 +398,7 @@ static PT_THREAD (fn_dynamic(struct pt *pt)) {
                     if( dx < MIN_DIST_PLUS && MIN_DIST_MINUS < dx && 
                         dy < MIN_DIST_PLUS && MIN_DIST_MINUS < dy ) {
                         fix16 mod_rij = multfix16(dx,dx)+multfix16(dy,dy);
-                        if( mod_rij == 0 && b1->hit_counter == 0) {
+                        if( mod_rij < CLOSE_ENOUGH && b1->hit_counter == 0) {
                             // avoid divided by zero
                             fix16 swp;
                             swp = b1->vx;
@@ -406,7 +430,7 @@ static PT_THREAD (fn_dynamic(struct pt *pt)) {
     #endif
             fix16 beta = float2fix16(0.01f*dt);
             for( i=0; i<N; i++) {
-                struct ball* b1 = &balls[i];            
+                struct ball* b1 = &balls[i];  
                 DRAWCIRCLE(
                         fix2int16(b1->rx), fix2int16(b1->ry), 
                         2*BALL_RADIUS, 2*BALL_RADIUS, 2, ILI9340_BLACK);
@@ -445,8 +469,8 @@ static PT_THREAD (fn_dynamic(struct pt *pt)) {
                         score --;
                         b1->needs_recycle = 1;
                         DRAWCIRCLE(
-                        fix2int16(b1->rx), fix2int16(b1->ry), 
-                        2*BALL_RADIUS, 2*BALL_RADIUS, 2, ILI9340_BLACK);
+                        fix2int16(b1->rx), fix2int16(b1->ry),
+                        0, 0, 2, ILI9340_BLACK);
                         OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, 300);
                         DmaChnEnable(dmaChn); 
                         continue;
@@ -471,11 +495,26 @@ static PT_THREAD (fn_dynamic(struct pt *pt)) {
                 }
 
             } // END RENDER BALLS
-            tft_drawLine(80,0,80,60,ILI9340_GREEN);
-            tft_drawLine(80,180,80,240,ILI9340_GREEN);
-            tft_drawLine(20,0,20,240,ILI9340_BLACK);
-            tft_drawLine(20,paddle_y,20,paddle_y+PADDLE_WIDTH,ILI9340_RED);
+            tft_drawFastVLine(80,0,60,ILI9340_GREEN);
+            tft_drawFastVLine(80,180,60,ILI9340_GREEN);
+            tft_drawFastVLine(20,0,240,ILI9340_BLACK);
+            tft_drawFastVLine(20,paddle_y,PADDLE_WIDTH,ILI9340_GREEN);
+//            tft_drawLine(80,0,80,60,ILI9340_GREEN);
+//            tft_drawLine(80,180,80,240,ILI9340_GREEN);
+//            tft_drawLine(20,0,20,240,ILI9340_BLACK);
+//            tft_drawLine(20,paddle_y,20,paddle_y+PADDLE_WIDTH,ILI9340_RED);
             cal_t = PT_GET_TIME() - now;
+        } else if( state == 2 ) {            
+            OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, freqs[freq_idx]);
+            DmaChnEnable(dmaChn);
+            freq_idx++;
+            if( freq_idx>=7 ) freq_idx = 0;
+            tft_setCursor(40, 40);
+            tft_fillRoundRect(40 ,40, 40, 40, 1, ILI9340_BLACK);    
+            tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
+            sprintf(buffer, "%d", freq_idx);
+            tft_writeString(buffer);
+            PT_YIELD_TIME_msec(100);
         }
     } // END WHILE(1)
     PT_END(pt);

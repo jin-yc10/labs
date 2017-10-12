@@ -117,6 +117,36 @@ static unsigned short rand_color() {
     return color_table[x];
 }
 
+
+static void begin_page(void){
+    tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);    
+    tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
+    tft_setCursor(0, 0);
+    sprintf(buffer, "Balls_Game");
+    tft_writeString(buffer);
+    
+    tft_setCursor(0,80);
+    sprintf(buffer, "Rule");
+    tft_writeString(buffer);
+    tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(1); 
+    tft_setCursor(0,110);
+    sprintf(buffer, "1. Balls hitting left side of panel increase scores");
+    tft_writeString(buffer);
+    tft_setCursor(0,120);
+    sprintf(buffer, "2. Balls pasting the paddle decrease scores");
+    tft_writeString(buffer);
+    
+    tft_setCursor(0,150);
+    sprintf(buffer, "Press any button to start game");
+    tft_writeString(buffer);
+    
+    tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2);
+    tft_setCursor(0,220);
+    sprintf(buffer, "Good Luck");
+    tft_writeString(buffer);
+    
+}
+
 #define PADDLE_X 20
 #define PADDLE_WIDTH 60
 static unsigned int paddle_y = 90;
@@ -250,8 +280,8 @@ static PT_THREAD (fn_dynamic(struct pt *pt)) {
     static unsigned char key_code = 0;
     tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);    
     tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
-    sprintf(buffer, "BEGINNING");
-    tft_writeString(buffer);
+    begin_page();
+
     while(1) {
         key_code = 0;
         if( mPORTAReadBits(BIT_1)==0 && temp==0 ) {
@@ -275,10 +305,9 @@ static PT_THREAD (fn_dynamic(struct pt *pt)) {
                 start_time = PT_GET_TIME();
             } else if( state == 1) { // GAME
                 state = 0;
-                tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);    
-                tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
-                sprintf(buffer, "BEGINNING");
-                tft_writeString(buffer);
+
+                begin_page();
+
             } else if( state == 2) { // END
                 OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, 600);
                 for (i=0; i<9; i++){

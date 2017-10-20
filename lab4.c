@@ -39,6 +39,13 @@ typedef signed int fix16 ;
 #define absfix16(a)     abs(a)
 #endif
 
+
+static float kp, ki, kd;
+static float target;
+static float current;
+static float error, last_error, derivative, sigma_error;
+static float control_val;
+
 // == Timer 2 ISR =====================================================
 // just toggles a pin for timeing strobe
 void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
@@ -47,6 +54,11 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
     // clear the timer interrupt flag
     mT2ClearIntFlag();
     mPORTBClearBits(BIT_0);
+    
+    error = target - current;
+    sigma_error += error;
+    derivative = error - last_error;
+    control_val = kp*error+ki*sigma_error+kd*derivative;
 }
 
 

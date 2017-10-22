@@ -59,6 +59,27 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
     sigma_error += error;
     derivative = error - last_error;
     control_val = kp*error+ki*sigma_error+kd*derivative;
+      last_error = error;
+//    error = (target - last_error);
+//    
+//    proportional_cntl = kp * error;
+//    differential_cntl = kd * (error - last_error); 
+//    integral_cntl = integral_cntl + error ;
+//    if (error == last_error){
+//        integral_cntl = 0;
+//    }
+//    control_val =  proportional_cntl + differential_cntl + ki * integral_cntl ;
+//    //uncomment this next statement to get a passive pendulum
+//    //control_val = 0;  
+//    
+//   // physical bound of the PWM 
+//   if (control_val<0) {
+//        control_val = 0;
+//    }
+//   // physical bound of the PWM 
+//   if (control_val>39999) {
+//        control_val = 39999 ;
+//    }
 }
 
 

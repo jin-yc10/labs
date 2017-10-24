@@ -12,10 +12,13 @@
 // clock AND protoThreads configure!
 // You MUST check this file!
 #include "config.h"
+#include "tft_master.h"
+#include "tft_gfx.h"
 // threading library
 #include "pt_cornell_1_2_1.h"
 
-static struct pt pt_time, pt_cmd, pt_adc;
+static struct pt pt_time, pt_display, pt_adc;
+static char buffer[60];
 
 // system 1 second interval tick
 int sys_time_seconds ;
@@ -39,27 +42,42 @@ typedef signed int fix16 ;
 #define absfix16(a)     abs(a)
 #endif
 
+#define DAC_config_chan_A 0b0011000000000000
+#define DAC_config_chan_B 0b1011000000000000
+volatile SpiChannel spiChn = SPI_CHANNEL2 ;	// the SPI channel to use
+volatile int spiClkDiv = 2 ; // 15 MHz DAC clock
 
-static float kp, ki, kd;
+static float kp = 200.0f, ki = 0.0625f, kd = 0000.0f;
 static float target;
 static float current;
-static float error, last_error, derivative, sigma_error;
+static float error = 0.0f, last_error, derivative, sigma_error;
 static float control_val;
 
 // == Timer 2 ISR =====================================================
 // just toggles a pin for timeing strobe
+
+char sign(float v) {
+    if( v > 0.0f ) return 1;
+    else if( v == 0.0f ) return 0;
+    else return -1;
+}
+
 void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
-    // generate a trigger strobe for timing other events
-    mPORTBSetBits(BIT_0);
     // clear the timer interrupt flag
     mT2ClearIntFlag();
-    mPORTBClearBits(BIT_0);
     
     error = target - current;
     sigma_error += error;
     derivative = error - last_error;
-    control_val = kp*error+ki*sigma_error+kd*derivative;
-      last_error = error;
+//    if (sign(error) != sign(last_error)){
+//        sigma_error = 0;
+//    }
+    control_val = kp * error + ki * sigma_error + kd * derivative;
+    last_error = error;
+    if( control_val < 0 ) control_val = 0;
+    if( control_val > 32000 ) control_val = 32000;
+    
+    SetDCOC3PWM(control_val);
 //    error = (target - last_error);
 //    
 //    proportional_cntl = kp * error;
@@ -87,36 +105,44 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
 // The serial interface
 static char cmd[16]; 
 static int value;
+static int adc_11, adc_1;
 
 static PT_THREAD (protothread_adc(struct pt *pt)) {
-    PT_BEGIN(pt);
-    static int adc_9;
-    static float V, position;
-    static fix16 Vfix, ADC_scale ;
-    
-    ADC_scale = float2fix16(3.3/1023.0); //Vref/(full scale)
-            
+    PT_BEGIN(pt);        
     while(1) {
         // yield time 1 second
-        PT_YIELD_TIME_msec(60);
-        adc_9 = ReadADC10(0);   // read the result of channel 9 conversion from the idle buffer
-        AcquireADC10(); // not needed if ADC_AUTO_SAMPLING_ON below
-        V = (float)adc_9 * 3.3 / 1023.0 ; // Vref*adc/1023
-        // convert to fixed voltage
+        PT_YIELD_TIME_msec(100);
+        adc_11 = ReadADC10(0);
+        adc_1 = ReadADC10(1); 
+        target = ( adc_11 - 512 ) / 10;
+        current = - ( adc_1 - 522 ) / 3;
+        // end SPI transaction from last interrupt cycle
+        // CS low to start transaction
+        mPORTBSetBits(BIT_4);
+        mPORTBClearBits(BIT_4); // start transaction
+        WriteSPI2( DAC_config_chan_A | (short)((float)control_val/32000.0*4096.0));
+        PT_YIELD_TIME_msec(5);
+        mPORTBSetBits(BIT_4);
+        mPORTBClearBits(BIT_4); // start transaction
+        WriteSPI2( DAC_config_chan_B | (short)((float)current/180.0*4096.0));
+//        SetDCOC3PWM((int)((float)adc_11/750.0*20000.0));
+//        AcquireADC10(); // not needed if ADC_AUTO_SAMPLING_ON below
+//        V = (float)adc_11 * 3.3 / 1023.0 ; // Vref*adc/1023
+//        target = V;
+//        current = (float)adc_1 * 3.3 / 1023.0 ;
     }
     PT_END(pt);
 } // animation thread
 
-static PT_THREAD (protothread_cmd(struct pt *pt)) {
+static PT_THREAD (protothread_display(struct pt *pt)) {
     PT_BEGIN(pt);
-    static int step;
-    step = generate_period / 100;
     while(1) {
-        PT_YIELD_TIME_msec(100);
-        if(pwm_on_time >= generate_period ) pwm_increment = -step;
-        if(pwm_on_time <= 0) pwm_increment = step;
-        pwm_on_time += pwm_increment;
-        SetDCOC3PWM(pwm_on_time);
+        PT_YIELD_TIME_msec(60);
+        tft_setCursor(40, 40);
+        tft_fillRoundRect(40, 40, 280, 40, 1, ILI9340_BLACK);
+        tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
+        sprintf(buffer, "%d,%.1f,%.1f,%.1f", (int)control_val, target, current, error);
+        tft_writeString(buffer);
     } // END WHILE(1)
     PT_END(pt);
 } // thread 3
@@ -143,24 +169,47 @@ int main(void)
     OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, generate_period);
     ConfigIntTimer2(T2_INT_ON | T2_INT_PRIOR_2);
     mT2ClearIntFlag(); // and clear the interrupt flag
-
-    // set up compare3 for PWM mode
+//
+//    // set up compare3 for PWM mode
     OpenOC3(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE , pwm_on_time, pwm_on_time); //
     // OC3 is PPS group 4, map to RPB9 (pin 18)
     PPSOutput(4, RPB9, OC3);
-
+    
+    CloseADC10();	// ensure the ADC is off before setting the configuration
+    #define PARAM1 ADC_FORMAT_INTG16 | ADC_CLK_AUTO | ADC_AUTO_SAMPLING_ON //
+	#define PARAM2 ADC_VREF_AVDD_AVSS | ADC_OFFSET_CAL_DISABLE | ADC_SCAN_OFF | ADC_SAMPLES_PER_INT_2 | ADC_ALT_BUF_OFF | ADC_ALT_INPUT_ON
+    #define PARAM3 ADC_CONV_CLK_PB | ADC_SAMPLE_TIME_15 | ADC_CONV_CLK_Tcy //ADC_SAMPLE_TIME_15| ADC_CONV_CLK_Tcy2
+	#define PARAM4 ENABLE_AN11_ANA | ENABLE_AN1_ANA // pin 24(RB13), pin3(RA1)
+	#define PARAM5 SKIP_SCAN_ALL
+    // configure to sample AN11, AN10 
+    SetChanADC10( ADC_CH0_NEG_SAMPLEA_NVREF | ADC_CH0_POS_SAMPLEA_AN11 | ADC_CH0_NEG_SAMPLEB_NVREF | ADC_CH0_POS_SAMPLEB_AN1 ); 
+	OpenADC10( PARAM1, PARAM2, PARAM3, PARAM4, PARAM5 ); // configure ADC using the parameters defined above
+	EnableADC10(); // Enable the ADC
+    
+    PPSOutput(2, RPB5, SDO2);
+    mPORTBSetPinsDigitalOut(BIT_4);
+    mPORTBSetBits(BIT_4);
+    SpiChnOpen(spiChn, SPI_OPEN_ON | SPI_OPEN_MODE16 | SPI_OPEN_MSTEN | SPI_OPEN_CKE_REV , spiClkDiv);
+    
+    tft_init_hw();
+    tft_begin();
+    tft_fillScreen(ILI9340_BLACK);
+    tft_setRotation(1); // FOR HORIZONTAL 320x240
+    
     // === config the uart, DMA, vref, timer5 ISR ===========
     PT_setup();
 
     // === setup system wide interrupts  ====================
     INTEnableSystemMultiVectoredInt();
 
-    PT_INIT(&pt_cmd);
+    PT_INIT(&pt_display);
     PT_INIT(&pt_time);
+    PT_INIT(&pt_adc);    
 
     // schedule the threads
     while(1) {
-        PT_SCHEDULE(protothread_cmd(&pt_cmd));
+        PT_SCHEDULE(protothread_display(&pt_display));
         PT_SCHEDULE(protothread_time(&pt_time));
+        PT_SCHEDULE(protothread_adc(&pt_adc));
     }
 } // main

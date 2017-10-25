@@ -47,10 +47,10 @@ typedef signed int fix16 ;
 volatile SpiChannel spiChn = SPI_CHANNEL2 ;	// the SPI channel to use
 volatile int spiClkDiv = 2 ; // 15 MHz DAC clock
 
-static float kp = 200.0f, ki = 0.0625f, kd = 0000.0f;
+static float kp = 60.0f, ki = 0.03125f, kd = 2000.0f;
 static float target;
 static float current;
-static float error = 0.0f, last_error, derivative, sigma_error;
+static float error = 0.0f, last_error, derivative, sigma_error = 0.0f;
 static float control_val;
 
 // == Timer 2 ISR =====================================================
@@ -70,7 +70,7 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
     sigma_error += error;
     derivative = error - last_error;
 //    if (sign(error) != sign(last_error)){
-//        sigma_error = 0;
+//        sigma_error *= 0.999f;
 //    }
     control_val = kp * error + ki * sigma_error + kd * derivative;
     last_error = error;
@@ -105,17 +105,21 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
 // The serial interface
 static char cmd[16]; 
 static int value;
-static int adc_11, adc_1;
+static int adc_11, adc_1, raw_11;
 
 static PT_THREAD (protothread_adc(struct pt *pt)) {
     PT_BEGIN(pt);        
     while(1) {
         // yield time 1 second
-        PT_YIELD_TIME_msec(100);
+        PT_YIELD_TIME_msec(30);
         adc_11 = ReadADC10(0);
         adc_1 = ReadADC10(1); 
-        target = ( adc_11 - 512 ) / 10;
-        current = - ( adc_1 - 522 ) / 3;
+        raw_11 = ( adc_11 - 512 ) / 2;
+        if( abs(raw_11 - target) > 5 ) {
+            target = raw_11;
+        }
+        
+        current = - ( adc_1 - 522 );
         // end SPI transaction from last interrupt cycle
         // CS low to start transaction
         mPORTBSetBits(BIT_4);
@@ -139,9 +143,12 @@ static PT_THREAD (protothread_display(struct pt *pt)) {
     while(1) {
         PT_YIELD_TIME_msec(60);
         tft_setCursor(40, 40);
-        tft_fillRoundRect(40, 40, 280, 40, 1, ILI9340_BLACK);
+        tft_fillRoundRect(40, 40, 280, 80, 1, ILI9340_BLACK);
         tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
         sprintf(buffer, "%d,%.1f,%.1f,%.1f", (int)control_val, target, current, error);
+        tft_writeString(buffer);
+        tft_setCursor(40, 80);
+        sprintf(buffer, "%.1f %.1f %.1f %.1f", error, last_error, derivative, sigma_error);
         tft_writeString(buffer);
     } // END WHILE(1)
     PT_END(pt);

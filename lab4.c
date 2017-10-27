@@ -47,11 +47,13 @@ typedef signed int fix16 ;
 volatile SpiChannel spiChn = SPI_CHANNEL2 ;	// the SPI channel to use
 volatile int spiClkDiv = 2 ; // 15 MHz DAC clock
 
-static float kp = 60.0f, ki = 0.03125f, kd = 2000.0f;
+static float kp = 80.0f, ki = 0.0625f, kd = 16000.0f;
 static float target;
 static float current;
 static float error = 0.0f, last_error, derivative, sigma_error = 0.0f;
 static float control_val;
+
+static unsigned char state = 1; // 0 Begin, 1 RUNNING
 
 // == Timer 2 ISR =====================================================
 // just toggles a pin for timeing strobe
@@ -69,15 +71,20 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
     error = target - current;
     sigma_error += error;
     derivative = error - last_error;
-//    if (sign(error) != sign(last_error)){
-//        sigma_error *= 0.999f;
-//    }
+    if (sign(error) != sign(last_error)){
+        sigma_error *= 0.99f;
+    }
     control_val = kp * error + ki * sigma_error + kd * derivative;
     last_error = error;
     if( control_val < 0 ) control_val = 0;
     if( control_val > 32000 ) control_val = 32000;
     
-    SetDCOC3PWM(control_val);
+    if( state == 1 ) {
+        SetDCOC3PWM(control_val);    
+    } else {
+        SetDCOC3PWM(0);    
+    }
+    
 //    error = (target - last_error);
 //    
 //    proportional_cntl = kp * error;
@@ -115,20 +122,16 @@ static PT_THREAD (protothread_adc(struct pt *pt)) {
         adc_11 = ReadADC10(0);
         adc_1 = ReadADC10(1); 
         raw_11 = ( adc_11 - 512 ) / 2;
-        if( abs(raw_11 - target) > 5 ) {
-            target = raw_11;
-        }
-        
         current = - ( adc_1 - 522 );
         // end SPI transaction from last interrupt cycle
         // CS low to start transaction
         mPORTBSetBits(BIT_4);
         mPORTBClearBits(BIT_4); // start transaction
-        WriteSPI2( DAC_config_chan_A | (short)((float)control_val/32000.0*4096.0));
+        WriteSPI2( DAC_config_chan_A | (short)((float)control_val/32000.0*4000.0));
         PT_YIELD_TIME_msec(5);
         mPORTBSetBits(BIT_4);
         mPORTBClearBits(BIT_4); // start transaction
-        WriteSPI2( DAC_config_chan_B | (short)((float)current/180.0*4096.0));
+        WriteSPI2( DAC_config_chan_B | (short)((float)(current+501)/1023.0*4000.0));
 //        SetDCOC3PWM((int)((float)adc_11/750.0*20000.0));
 //        AcquireADC10(); // not needed if ADC_AUTO_SAMPLING_ON below
 //        V = (float)adc_11 * 3.3 / 1023.0 ; // Vref*adc/1023
@@ -138,18 +141,93 @@ static PT_THREAD (protothread_adc(struct pt *pt)) {
     PT_END(pt);
 } // animation thread
 
+static char first_key = 0;
+
 static PT_THREAD (protothread_display(struct pt *pt)) {
     PT_BEGIN(pt);
+    
+    static unsigned int temp = 0; 
+    static unsigned int para_idx = 0;
+    static unsigned char key_code = 0;
+    
     while(1) {
-        PT_YIELD_TIME_msec(60);
-        tft_setCursor(40, 40);
-        tft_fillRoundRect(40, 40, 280, 80, 1, ILI9340_BLACK);
-        tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
-        sprintf(buffer, "%d,%.1f,%.1f,%.1f", (int)control_val, target, current, error);
-        tft_writeString(buffer);
-        tft_setCursor(40, 80);
-        sprintf(buffer, "%.1f %.1f %.1f %.1f", error, last_error, derivative, sigma_error);
-        tft_writeString(buffer);
+        key_code = 0;
+        if( mPORTAReadBits(BIT_2)==0 && temp==0 ) {
+            temp |= 1;
+            key_code = 1;
+        }
+        if( mPORTAReadBits(BIT_2)==0x04 ) {
+            temp &= ~(1);
+        }
+        if( mPORTAReadBits(BIT_3)==0 && temp==0 ) {
+            temp |= 2;
+            key_code = 2;
+        }
+        if( mPORTAReadBits(BIT_3)==0x08 ) {
+            temp &= ~(2);
+        }
+        
+        if( key_code == 1 ) { 
+            first_key = 1;
+            if( state == 0 ) {// BEGIN
+                state = 1;
+                tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);  
+            } else if( state == 1) { // RUNNING
+                state = 0;
+                tft_fillRoundRect(0 ,0, 320, 240, 1, ILI9340_BLACK);  
+            }
+        } else if( key_code == 2 ) {
+            first_key = 1;
+            if( state == 0 ) {
+                para_idx ++;
+                if( para_idx > 2 ) para_idx = 0;
+            } else {
+                // do nothing while running
+            }
+        }
+        
+        if( state == 1 ) {
+            if( abs(raw_11 - target) > 5 && first_key == 1) {
+                target = raw_11;
+            }
+            PT_YIELD_TIME_msec(60);
+            tft_setCursor(40, 40);
+            tft_fillRoundRect(40, 40, 280, 80, 1, ILI9340_BLACK);
+            tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
+            sprintf(buffer, "%d,%.1f,%.1f,%.1f", (int)control_val, target/3.0f, current/3.0f, error);
+            tft_writeString(buffer);
+            tft_setCursor(40, 80);
+            sprintf(buffer, "%.1f %.1f %.1f %.1f", error, last_error, derivative, sigma_error);
+            tft_writeString(buffer);
+            tft_setTextSize(1); 
+            tft_setCursor(40, 120);
+            sprintf(buffer, "kp=%.1f ki=%.1f kd=%.1f", kp, ki, kd);
+            tft_writeString(buffer);
+        } else if( state == 0 ) {
+            PT_YIELD_TIME_msec(60);            
+            tft_setTextSize(2); 
+            tft_fillRoundRect(40, 20, 40, 40, 1, ILI9340_BLACK);
+            tft_setCursor(40, 20);
+            switch( para_idx ) {
+                case 0: // kp
+                    kp = 1.0f*(raw_11+255);
+                    sprintf(buffer, "kp");
+                    break;
+                case 1: // ki
+                    ki = 0.001f*(raw_11+255);
+                    sprintf(buffer, "ki");
+                    break;
+                case 2: // kd
+                    kd = 4.0f*(raw_11+255);
+                    sprintf(buffer, "kd");
+                    break;
+            }
+            tft_writeString(buffer);
+            tft_fillRoundRect(40, 40, 280, 40, 1, ILI9340_BLACK);
+            tft_setCursor(40, 40);
+            sprintf(buffer, "kp=%.1f ki=%.1f kd=%.1f", kp, ki, kd);
+            tft_writeString(buffer);
+        }           
     } // END WHILE(1)
     PT_END(pt);
 } // thread 3
@@ -161,8 +239,17 @@ static PT_THREAD (protothread_time(struct pt *pt))
     PT_BEGIN(pt);
     while(1) {
         // yield time 1 second
-        PT_YIELD_TIME_msec(1000) ;
+        PT_YIELD_TIME_msec(1000);
         sys_time_seconds++ ;
+        if( sys_time_seconds < 5 ) {
+            target = 0;
+        } else if( sys_time_seconds < 10 ) {
+            target = 90;
+        } else if( sys_time_seconds < 15 ) {
+            target = -90;
+        } else if( first_key == 0 ) {
+            target = 0;
+        }
         // NEVER exit while
     } // END WHILE(1)
     PT_END(pt);
@@ -170,14 +257,13 @@ static PT_THREAD (protothread_time(struct pt *pt))
 
 // === Main  ======================================================
 
-int main(void)
-{
+int main(void) {
     // set up timer2 to generate the wave period
     OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, generate_period);
     ConfigIntTimer2(T2_INT_ON | T2_INT_PRIOR_2);
     mT2ClearIntFlag(); // and clear the interrupt flag
-//
-//    // set up compare3 for PWM mode
+
+    // set up compare3 for PWM mode
     OpenOC3(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE , pwm_on_time, pwm_on_time); //
     // OC3 is PPS group 4, map to RPB9 (pin 18)
     PPSOutput(4, RPB9, OC3);
@@ -197,6 +283,8 @@ int main(void)
     mPORTBSetPinsDigitalOut(BIT_4);
     mPORTBSetBits(BIT_4);
     SpiChnOpen(spiChn, SPI_OPEN_ON | SPI_OPEN_MODE16 | SPI_OPEN_MSTEN | SPI_OPEN_CKE_REV , spiClkDiv);
+    
+    mPORTASetPinsDigitalIn(BIT_2|BIT_3);
     
     tft_init_hw();
     tft_begin();

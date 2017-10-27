@@ -47,44 +47,64 @@ typedef signed int fix16 ;
 volatile SpiChannel spiChn = SPI_CHANNEL2 ;	// the SPI channel to use
 volatile int spiClkDiv = 2 ; // 15 MHz DAC clock
 
-static float kp = 80.0f, ki = 0.0625f, kd = 16000.0f;
-static float target;
-static float current;
-static float error = 0.0f, last_error, derivative, sigma_error = 0.0f;
-static float control_val;
+static int kp = 300, ki_inv = 16, kd = 16000;
+static int target;
+static int current;
+static int error = 0, last_error, derivative, sigma_error = 0;
+static int control_val;
+
+static int last_errors[5];
+static int last_error_idx = 0;
 
 static unsigned char state = 1; // 0 Begin, 1 RUNNING
-
+static int isr_cnt = 0;
 // == Timer 2 ISR =====================================================
 // just toggles a pin for timeing strobe
 
-char sign(float v) {
-    if( v > 0.0f ) return 1;
-    else if( v == 0.0f ) return 0;
+char sign(int v) {
+    if( v > 0 ) return 1;
+    else if( v == 0 ) return 0;
     else return -1;
 }
 
 void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
+    static char i;
+    static int last_error_sum;
+    isr_cnt++;
     // clear the timer interrupt flag
     mT2ClearIntFlag();
     
     error = target - current;
     sigma_error += error;
-    derivative = error - last_error;
-    if (sign(error) != sign(last_error)){
-        sigma_error *= 0.99f;
+    
+    if(last_error_idx < 4) {
+        derivative = 0;
+    } else {
+        last_error = last_errors[0];
+        derivative = (error - last_error)/5;
     }
-    control_val = kp * error + ki * sigma_error + kd * derivative;
-    last_error = error;
+//      if (abs(error) > 30){
+//        sigma_error = 0;
+//    }
+    control_val = kp * error + kd * derivative + sigma_error / ki_inv;
+
     if( control_val < 0 ) control_val = 0;
-    if( control_val > 32000 ) control_val = 32000;
+    if( control_val > 20000 ) control_val = 20000;
     
     if( state == 1 ) {
         SetDCOC3PWM(control_val);    
     } else {
         SetDCOC3PWM(0);    
     }
-    
+    if(last_error_idx < 4) {
+        last_errors[last_error_idx] = error;
+        last_error_idx++;
+    } else {
+        for(i=1; i<5; i++) {
+            last_errors[i-1] = last_errors[i];
+        }
+        last_errors[4] = error;
+    }    
 //    error = (target - last_error);
 //    
 //    proportional_cntl = kp * error;
@@ -194,14 +214,15 @@ static PT_THREAD (protothread_display(struct pt *pt)) {
             tft_setCursor(40, 40);
             tft_fillRoundRect(40, 40, 280, 80, 1, ILI9340_BLACK);
             tft_setTextColor(ILI9340_YELLOW);  tft_setTextSize(2); 
-            sprintf(buffer, "%d,%.1f,%.1f,%.1f", (int)control_val, target/3.0f, current/3.0f, error);
+            sprintf(buffer, "%d,%d,%d,%d", control_val, target/3, current/3, error);
             tft_writeString(buffer);
             tft_setCursor(40, 80);
-            sprintf(buffer, "%.1f %.1f %.1f %.1f", error, last_error, derivative, sigma_error);
+            sprintf(buffer, "%d %d %d %d", error, last_error, derivative, sigma_error);
             tft_writeString(buffer);
             tft_setTextSize(1); 
+            tft_fillRoundRect(40, 120, 200, 20, 1, ILI9340_BLACK);
             tft_setCursor(40, 120);
-            sprintf(buffer, "kp=%.1f ki=%.1f kd=%.1f", kp, ki, kd);
+            sprintf(buffer, "p=%d d=%d i=%d", kp * error, kd * derivative, sigma_error / ki_inv);
             tft_writeString(buffer);
         } else if( state == 0 ) {
             PT_YIELD_TIME_msec(60);            
@@ -214,7 +235,7 @@ static PT_THREAD (protothread_display(struct pt *pt)) {
                     sprintf(buffer, "kp");
                     break;
                 case 1: // ki
-                    ki = 0.001f*(raw_11+255);
+//                    ki = 0.001f*(raw_11+255);
                     sprintf(buffer, "ki");
                     break;
                 case 2: // kd
@@ -222,10 +243,11 @@ static PT_THREAD (protothread_display(struct pt *pt)) {
                     sprintf(buffer, "kd");
                     break;
             }
+            
             tft_writeString(buffer);
             tft_fillRoundRect(40, 40, 280, 40, 1, ILI9340_BLACK);
             tft_setCursor(40, 40);
-            sprintf(buffer, "kp=%.1f ki=%.1f kd=%.1f", kp, ki, kd);
+//            sprintf(buffer, "kp=%.1f ki=%.1f kd=%.1f", kp, ki, kd);
             tft_writeString(buffer);
         }           
     } // END WHILE(1)
@@ -241,10 +263,17 @@ static PT_THREAD (protothread_time(struct pt *pt))
         // yield time 1 second
         PT_YIELD_TIME_msec(1000);
         sys_time_seconds++ ;
+        
+        tft_fillRoundRect(40, 160, 80, 40, 1, ILI9340_BLACK);
+        tft_setTextSize(2); 
+        tft_setCursor(40, 160);
+        sprintf(buffer, "isr=%d", isr_cnt);
+        isr_cnt = 0;
+        tft_writeString(buffer);
         if( sys_time_seconds < 5 ) {
             target = 0;
         } else if( sys_time_seconds < 10 ) {
-            target = 90;
+            target = 75;
         } else if( sys_time_seconds < 15 ) {
             target = -90;
         } else if( first_key == 0 ) {

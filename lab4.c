@@ -47,13 +47,13 @@ typedef signed int fix16 ;
 volatile SpiChannel spiChn = SPI_CHANNEL2 ;	// the SPI channel to use
 volatile int spiClkDiv = 2 ; // 15 MHz DAC clock
 
-static int kp = 300, ki_inv = 16, kd = 16000;
+static int kp = 120, ki_inv = 16, kd = 10000;
 static int target;
 static int current;
 static int error = 0, last_error, derivative, sigma_error = 0;
 static int control_val;
 
-static int last_errors[5];
+static int last_errors[10];
 static int last_error_idx = 0;
 
 static unsigned char state = 1; // 0 Begin, 1 RUNNING
@@ -77,11 +77,11 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
     error = target - current;
     sigma_error += error;
     
-    if(last_error_idx < 4) {
+    if(last_error_idx < 9) {
         derivative = 0;
     } else {
         last_error = last_errors[0];
-        derivative = (error - last_error)/5;
+        derivative = (error - last_error);
     }
 //      if (abs(error) > 30){
 //        sigma_error = 0;
@@ -96,14 +96,14 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
     } else {
         SetDCOC3PWM(0);    
     }
-    if(last_error_idx < 4) {
+    if(last_error_idx < 9) {
         last_errors[last_error_idx] = error;
         last_error_idx++;
     } else {
-        for(i=1; i<5; i++) {
+        for(i=1; i<10; i++) {
             last_errors[i-1] = last_errors[i];
         }
-        last_errors[4] = error;
+        last_errors[9] = error;
     }    
 //    error = (target - last_error);
 //    
@@ -271,10 +271,12 @@ static PT_THREAD (protothread_time(struct pt *pt))
         isr_cnt = 0;
         tft_writeString(buffer);
         if( sys_time_seconds < 5 ) {
-            target = 0;
+            target = -270;
         } else if( sys_time_seconds < 10 ) {
-            target = 75;
+            target = 0;
         } else if( sys_time_seconds < 15 ) {
+            target = 90;
+        } else if( sys_time_seconds < 20 ) {
             target = -90;
         } else if( first_key == 0 ) {
             target = 0;
@@ -332,7 +334,7 @@ int main(void) {
 
     // schedule the threads
     while(1) {
-        PT_SCHEDULE(protothread_display(&pt_display));
+       // PT_SCHEDULE(protothread_display(&pt_display));
         PT_SCHEDULE(protothread_time(&pt_time));
         PT_SCHEDULE(protothread_adc(&pt_adc));
     }

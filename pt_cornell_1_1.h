@@ -1,8 +1,8 @@
 /* 
- * File:   pt_cornell_1_1.h
+ * File:   pt_cornell_1_2_2.h
  * Author: brl4
  *
- * Created on Sept 22, 2015
+ * Created on Oct 30, 2017
  */
 
 /*
@@ -124,24 +124,26 @@
  */
 #endif /* DOXYGEN */
 
-#ifndef __LC_H__
-#define __LC_H__
+//#ifndef __LC_H__
+//#define __LC_H__
 
 
-#ifdef LC_INCLUDE
-#include LC_INCLUDE
-#else
+//#ifdef LC_INCLUDE
+//#include LC_INCLUDE
+//#else
+
 /////////////////////////////
 //#include "lc-switch.h"
 /////////////////////////////
 
-#ifndef __LC_SWITCH_H__
-#define __LC_SWITCH_H__
+//#ifndef __LC_SWITCH_H__
+//#define __LC_SWITCH_H__
 
 /* WARNING! lc implementation using switch() does not work if an
    LC_SET() is done within another switch() statement! */
 
 /** \hideinitializer */
+/*
 typedef unsigned short lc_t;
 
 #define LC_INIT(s) s = 0;
@@ -156,14 +158,48 @@ typedef unsigned short lc_t;
 
 /** @} */
 
-#endif /* LC_INCLUDE */
+//#endif /* LC_INCLUDE */
 
-#endif /* __LC_H__ */
+//#endif /* __LC_H__ */
 
 /** @} */
 /** @} */
 
+/////////////////////////////
+//#include "lc-addrlabels.h"
+/////////////////////////////
 
+#ifndef __LC_ADDRLABELS_H__
+#define __LC_ADDRLABELS_H__
+
+/** \hideinitializer */
+typedef void * lc_t;
+
+#define LC_INIT(s) s = NULL
+
+#define LC_RESUME(s)				\
+  do {						\
+    if(s != NULL) {				\
+      goto *s;					\
+    }						\
+  } while(0)
+
+#define LC_CONCAT2(s1, s2) s1##s2
+#define LC_CONCAT(s1, s2) LC_CONCAT2(s1, s2)
+
+#define LC_SET(s)				\
+  do {						\
+    LC_CONCAT(LC_LABEL, __LINE__):   	        \
+    (s) = &&LC_CONCAT(LC_LABEL, __LINE__);	\
+  } while(0)
+
+#define LC_END(s)
+
+#endif /* __LC_ADDRLABELS_H__ */
+
+
+
+//////////////////////////////////////////
 struct pt {
   lc_t lc;
   int pri;
@@ -577,7 +613,7 @@ do { static int i ; \
 #define pcr()    printf( '\r')
 #define crlf     putchar(0x0a); putchar(0x0d);
 #define backspace 0x7f // make sure your backspace matches this!
-#define max_chars 32 // for input/output buffer
+#define max_chars 64 // for input/output buffer
 //====================================================================
 // build a string from the UART2 /////////////
 //////////////////////////////////////////////
@@ -656,27 +692,32 @@ int PutSerialBuffer(struct pt *pt)
 
 //====================================================================
 // === DMA send string to the UART2 ==================================
-int PT_DMA_PutSerialBuffer(struct pt *pt)
-{
-    PT_BEGIN(pt);
-    //mPORTBSetBits(BIT_0);
-    // check for null string
-    if (PT_send_buffer[0]==0)PT_EXIT(pt);
-    // sent the first character
-    PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
-    UARTSendDataByte(UART2, PT_send_buffer[0]);
-    //DmaChnStartTxfer(DMA_CHANNEL1, DMA_WAIT_NOT, 0);
-    // start the DMA
-    DmaChnEnable(DMA_CHANNEL1);
-    // wait for DMA done
-    //mPORTBClearBits(BIT_0);
-    PT_YIELD_UNTIL(pt, DmaChnGetEvFlags(DMA_CHANNEL1) & DMA_EV_BLOCK_DONE);
 
-    // kill this output thread, to allow spawning thread to execute
-    PT_EXIT(pt);
-    // and indicate the end of the thread
-    PT_END(pt);
-}
+//int PT_DMA_PutSerialBuffer(struct pt *pt)
+//{
+//    
+//    PT_BEGIN(pt);
+//    //mPORTBSetBits(BIT_0);
+//    // check for null string
+//    if (PT_send_buffer[0]==0)PT_EXIT(pt);
+//    // sent the first character
+//    PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
+//    UARTSendDataByte(UART2, PT_send_buffer[0]);
+//    //DmaChnStartTxfer(DMA_CHANNEL1, DMA_WAIT_NOT, 0);
+//    // start the DMA
+//    DmaChnEnable(DMA_CHANNEL1);
+//    // wait for DMA done
+//    //mPORTBClearBits(BIT_0);
+//    PT_YIELD_UNTIL(pt, DmaChnGetEvFlags(DMA_CHANNEL1) & DMA_EV_BLOCK_DONE);
+//    //wait until the transmit buffer is empty
+//    PT_YIELD_UNTIL(pt, U2STA&0x100);
+//    
+//    // kill this output thread, to allow spawning thread to execute
+//    PT_EXIT(pt);
+//    // and indicate the end of the thread
+//    PT_END(pt);
+//}
+
 //#endif //#ifdef use_uart_serial
 
 //======================================================================
@@ -685,7 +726,9 @@ int CVRCON_setup ;
 
 // system time
 volatile unsigned int time_tick_millsec ;
-
+// force full context save
+//int w;
+//void waste(void){w=1;};
 // Timer 5 interrupt handler ///////
 // ipl2 means "interrupt priority level 2"
 void __ISR(_TIMER_5_VECTOR, IPL2AUTO) Timer5Handler(void) //_TIMER_5_VECTOR
@@ -694,6 +737,7 @@ void __ISR(_TIMER_5_VECTOR, IPL2AUTO) Timer5Handler(void) //_TIMER_5_VECTOR
     mT5ClearIntFlag();
     //count milliseconds
     time_tick_millsec++ ;
+    //waste();
 }
 
 void PT_setup (void)
@@ -709,13 +753,21 @@ void PT_setup (void)
   
 #ifdef use_uart_serial
   // === init the uart2 ===================
- PPSInput (2, U2RX, RPB11); //Assign U2RX to pin RPB11 -- Physical pin 22 on 28 PDIP
- PPSOutput(4, RPB10, U2TX); //Assign U2TX to pin RPB10 -- Physical pin 21 on 28 PDIP
+ // SET UART i/o PINS
+ // The RX pin must be one of the Group 2 input pins
+ // RPA1, RPB1, RPB5, RPB8, RPB11
+ PPSInput (2, U2RX, RPA1); //Assign U2RX to pin RPA1 -- 
+ // The TX pin must be one of the Group 4 output pins
+ // RPA3, RPB0, RPB9, RPB10, RPB14 
+ PPSOutput(4, RPB10, U2TX); //Assign U2TX to pin RPB10 -- 
+ 
   UARTConfigure(UART2, UART_ENABLE_PINS_TX_RX_ONLY);
   UARTSetLineControl(UART2, UART_DATA_SIZE_8_BITS | UART_PARITY_NONE | UART_STOP_BITS_1);
   UARTSetDataRate(UART2, pb_clock, BAUDRATE);
   UARTEnable(UART2, UART_ENABLE_FLAGS(UART_PERIPHERAL | UART_RX | UART_TX));
-  printf("\n\r..protothreads start..\n\r");
+  // Feel free to comment this out
+  clrscr();
+  printf("\n\r..protothreads 1_2_2 10/30/17..\n\r");
   // === set up DMA for UART output =========
   // configure the channel and enable end-on-match
   DmaChnOpen(DMA_CHANNEL1, DMA_CHN_PRI2, DMA_OPEN_MATCH);

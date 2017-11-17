@@ -19,7 +19,7 @@
 
 //+=============================================================================
 #if SEND_SONY
-void  sendSony (unsigned long data,  int nbits) {
+void sendSony (unsigned long data,  int nbits) {
     unsigned long  mask;
 	// Set IR carrier frequency
 	enableIROut(40);
@@ -43,7 +43,7 @@ void  sendSony (unsigned long data,  int nbits) {
 
 //+=============================================================================
 #if DECODE_SONY
-bool  decodeSony (decode_results *results)
+bool decodeSony (decode_results *results)
 {
 	long  data   = 0;
 	int   offset = 0;  // Dont skip first space, check its size

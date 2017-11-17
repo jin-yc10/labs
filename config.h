@@ -8,7 +8,11 @@
 
 #ifndef CONFIG_H
 #define	CONFIG_H
-#define _SUPPRESS_PLIB_WARNING 
+
+#ifndef _SUPPRESS_PLIB_WARNING
+#define _SUPPRESS_PLIB_WARNING 1
+#endif
+
 #define _DISABLE_OPENADC10_CONFIGPORT_WARNING
 #include <plib.h>
 // serial stuff

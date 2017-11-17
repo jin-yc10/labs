@@ -619,8 +619,7 @@ do { static int i ; \
 //////////////////////////////////////////////
 char PT_term_buffer[max_chars];
 int num_char;
-int PT_GetSerialBuffer(struct pt *pt)
-{
+int PT_GetSerialBuffer(struct pt *pt) {
     static char character;
     // mark the beginnning of the input thread
     PT_BEGIN(pt);
@@ -732,8 +731,7 @@ void __ISR(_TIMER_5_VECTOR, IPL2AUTO) Timer5Handler(void) //_TIMER_5_VECTOR
     time_tick_millsec++ ;
 }
 
-void PT_setup (void)
-{
+void PT_setup (void) {
   // Configure the device for maximum performance but do not change the PBDIV
     // Given the options, this function will change the flash wait states, RAM
     // wait state and enable prefetch cache but will not change the PBDIV.
@@ -751,7 +749,7 @@ void PT_setup (void)
   UARTSetLineControl(UART2, UART_DATA_SIZE_8_BITS | UART_PARITY_NONE | UART_STOP_BITS_1);
   UARTSetDataRate(UART2, pb_clock, BAUDRATE);
   UARTEnable(UART2, UART_ENABLE_FLAGS(UART_PERIPHERAL | UART_RX | UART_TX));
-  printf("\n\r..protothreads start..\n\r");
+  printf("protothreads start..\n\r");
   // === set up DMA for UART output =========
   // configure the channel and enable end-on-match
   DmaChnOpen(DMA_CHANNEL1, DMA_CHN_PRI2, DMA_OPEN_MATCH);

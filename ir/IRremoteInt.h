@@ -91,7 +91,7 @@ EXTERN  volatile irparams_t  irparams;
 #define LTOL            (1.0 - (TOLERANCE/100.))
 #define UTOL            (1.0 + (TOLERANCE/100.))
 
-#define USECPERTICK 50
+#define USECPERTICK     50
 
 // Minimum gap between IR transmissions
 #define _GAP            5000

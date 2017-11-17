@@ -1,8 +1,6 @@
 
 #include "IRremote.h"
 #include "IRremoteInt.h"
-#include "../config.h"
-#include "../pt_cornell_1_2_1.h"
 
 //+=============================================================================
 void  sendRaw (const unsigned int buf[],  unsigned int len,  unsigned int hz) {

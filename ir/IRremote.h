@@ -23,6 +23,8 @@
 //
 #include "IRremoteInt.h"
 
+unsigned int isr_counter;
+
 //------------------------------------------------------------------------------
 // Supported IR protocols
 // Each protocol you include costs memory and, during decode, costs time
@@ -131,8 +133,9 @@ decode_type_t;
 // Debug directives
 //
 #if DEBUG
-#	define DBG_PRINT(...)    Serial.print(__VA_ARGS__)
-#	define DBG_PRINTLN(...)  Serial.println(__VA_ARGS__)
+#	define DBG_PRINT(...)    printf(__VA_ARGS__)
+#	define DBG_PRINTLN(...)  printf(__VA_ARGS__);printf("\n")
+
 #else
 #	define DBG_PRINT(...)
 #	define DBG_PRINTLN(...)
@@ -171,7 +174,7 @@ int   decode     (decode_results *results) ;
 void  enableIRIn ( ) ;
 bool  isIdle     ( ) ;
 void  resume     ( ) ;
-long  decodeHash (decode_results *results) ;
+int   decodeHash (decode_results *results) ;
 int   compare    (unsigned int oldval, unsigned int newval) ;
 
 //......................................................................

@@ -1,7 +1,5 @@
 #include "IRremote.h"
 #include "IRremoteInt.h"
-#include "../config.h"
-#include "../pt_cornell_1_2_1.h"
 
 #ifdef IR_TIMER_USE_ESP32
 hw_timer_t *timer;
@@ -13,8 +11,7 @@ void IRTimer(); // defined in IRremote.cpp
 // Returns 0 if no data ready, 1 if data ready.
 // Results of decoding are stored in results
 //
-int  decode (decode_results *results)
-{
+int decode (decode_results *results) {
 	results->rawbuf   = irparams.rawbuf;
 	results->rawlen   = irparams.rawlen;
 
@@ -120,7 +117,7 @@ int  decode (decode_results *results)
 void  enableIRIn ( )
 {
 // Interrupt Service Routine - Fires every 50uS
-	cli();
+//	cli();
 	// Setup pulse clock timer interrupt
 	// Prescale /8 (16M/8 = 0.5 microseconds per tick)
 	// Therefore, the timer interval can range from 0.5 to 128 microseconds
@@ -199,8 +196,8 @@ int compare (unsigned int oldval,  unsigned int newval) {
 #define FNV_PRIME_32 16777619
 #define FNV_BASIS_32 2166136261
 
-long  decodeHash (decode_results *results) {
-	long  hash = FNV_BASIS_32;
+int decodeHash (decode_results *results) {
+	unsigned int hash = FNV_BASIS_32;
     int i;
 	// Require at least 6 samples to prevent triggering on noise
 	if (results->rawlen < 6)  return false ;

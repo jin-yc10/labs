@@ -24,6 +24,8 @@
 #	include "IRremoteInt.h"
 #undef IR_GLOBAL
 
+unsigned int isr_counter = 0;
+
 //+=============================================================================
 // The match functions were (apparently) originally MACROs to improve code speed
 //   (although this would have bloated the code) hence the names being CAPS
@@ -37,47 +39,22 @@
 //   in a hope of finding out what is going on, but for now they will remain as
 //   functions even in non-DEBUG mode
 //
-int  MATCH (int measured,  int desired)
-{
- 	DBG_PRINT(F("Testing: "));
- 	DBG_PRINT(TICKS_LOW(desired), DEC);
- 	DBG_PRINT(F(" <= "));
- 	DBG_PRINT(measured, DEC);
- 	DBG_PRINT(F(" <= "));
- 	DBG_PRINT(TICKS_HIGH(desired), DEC);
-
-  bool passed = ((measured >= TICKS_LOW(desired)) && (measured <= TICKS_HIGH(desired)));
-  if (passed)
-    DBG_PRINTLN(F("?; passed"));
-  else
-    DBG_PRINTLN(F("?; FAILED")); 
- 	return passed;
+int  MATCH (int measured,  int desired) {
+    bool passed = ((measured >= TICKS_LOW(desired)) && (measured <= TICKS_HIGH(desired)));
+    if (passed)
+        DBG_PRINTLN(F("?; passed"));
+    else
+        DBG_PRINTLN(F("?; FAILED")); 
+    return passed;
 }
 
 //+========================================================
 // Due to sensor lag, when received, Marks tend to be 100us too long
 //
-int  MATCH_MARK (int measured_ticks,  int desired_us)
-{
-	DBG_PRINT(F("Testing mark (actual vs desired): "));
-	DBG_PRINT(measured_ticks * USECPERTICK, DEC);
-	DBG_PRINT(F("us vs "));
-	DBG_PRINT(desired_us, DEC);
-	DBG_PRINT("us"); 
-	DBG_PRINT(": ");
-	DBG_PRINT(TICKS_LOW(desired_us + MARK_EXCESS) * USECPERTICK, DEC);
-	DBG_PRINT(F(" <= "));
-	DBG_PRINT(measured_ticks * USECPERTICK, DEC);
-	DBG_PRINT(F(" <= "));
-	DBG_PRINT(TICKS_HIGH(desired_us + MARK_EXCESS) * USECPERTICK, DEC);
-
-  bool passed = ((measured_ticks >= TICKS_LOW (desired_us + MARK_EXCESS))
-                && (measured_ticks <= TICKS_HIGH(desired_us + MARK_EXCESS)));
-  if (passed)
-    DBG_PRINTLN(F("?; passed"));
-  else
-    DBG_PRINTLN(F("?; FAILED")); 
- 	return passed;
+int  MATCH_MARK (int measured_ticks,  int desired_us) {
+    bool passed = ((measured_ticks >= TICKS_LOW (desired_us + MARK_EXCESS))
+                  && (measured_ticks <= TICKS_HIGH(desired_us + MARK_EXCESS)));
+    return passed;
 }
 
 //+========================================================
@@ -121,12 +98,11 @@ int  MATCH_SPACE (int measured_ticks,  int desired_us)
 void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
     // Just fot correction
     mT2ClearIntFlag();
-//	TIMER_RESET;
-
+    isr_counter++;
 	// Read if IR Receiver -> SPACE [xmt LED off] or a MARK [xmt LED on]
 	// digitalRead() is very slow. Optimisation is possible, but makes the code unportable
     // TODO: read data
-	uint8_t  irdata = //(uint8_t)digitalRead(irparams.recvpin);
+	uint8_t  irdata;//(uint8_t)digitalRead(irparams.recvpin);
 
 	irparams.timer++;  // One more 50uS tick
 	if (irparams.rawlen >= RAWBUF)  irparams.rcvstate = STATE_OVERFLOW ;  // Buffer overflow
@@ -180,14 +156,5 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
 			irparams.overflow = true;
 			irparams.rcvstate = STATE_STOP;
 		 	break;
-	}
-
-	// If requested, flash LED while receiving IR data
-	if (irparams.blinkflag) {
-		if (irdata == MARK)
-			if (irparams.blinkpin) digitalWrite(irparams.blinkpin, HIGH); // Turn user defined pin LED on
-				else BLINKLED_ON() ;   // if no user defined LED pin, turn default LED pin for the hardware on
-		else if (irparams.blinkpin) digitalWrite(irparams.blinkpin, LOW); // Turn user defined pin LED on
-				else BLINKLED_OFF() ;   // if no user defined LED pin, turn default LED pin for the hardware on
 	}
 }

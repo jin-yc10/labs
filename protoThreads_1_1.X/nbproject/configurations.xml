@@ -5,9 +5,9 @@
                    displayName="Header Files"
                    projectFiles="true">
       <itemPath>../config.h</itemPath>
+      <itemPath>../ir/IRremote.h</itemPath>
+      <itemPath>../ir/IRremoteInt.h</itemPath>
       <itemPath>../pt_cornell_1_1.h</itemPath>
-      <itemPath>../tft_gfx.h</itemPath>
-      <itemPath>../tft_master.h</itemPath>
     </logicalFolder>
     <logicalFolder name="LinkerScript"
                    displayName="Linker Files"
@@ -16,11 +16,11 @@
     <logicalFolder name="SourceFiles"
                    displayName="Source Files"
                    projectFiles="true">
-      <itemPath>../tft_gfx.c</itemPath>
-      <itemPath>../tft_master.c</itemPath>
-      <itemPath>../glcdfont.c</itemPath>
-      <itemPath>../TFT_animation_BRL4.c</itemPath>
-      <itemPath>../lab1.c</itemPath>
+      <itemPath>../lab5_uart.c</itemPath>
+      <itemPath>../ir/IRremote.c</itemPath>
+      <itemPath>../ir/irRecv.c</itemPath>
+      <itemPath>../ir/irSend.c</itemPath>
+      <itemPath>../ir/ir_Sony.c</itemPath>
     </logicalFolder>
     <logicalFolder name="ExternalFiles"
                    displayName="Important Files"
@@ -43,7 +43,7 @@
         <platformTool>PKOBSKDEPlatformTool</platformTool>
         <languageToolchain>XC32</languageToolchain>
         <languageToolchainVersion>1.34</languageToolchainVersion>
-        <platform>4</platform>
+        <platform>3</platform>
       </toolsSet>
       <compileType>
         <linkerTool>
@@ -57,8 +57,6 @@
           <parseOnProdLoad>true</parseOnProdLoad>
           <alternateLoadableFile></alternateLoadableFile>
         </loading>
-        <subordinates>
-        </subordinates>
       </compileType>
       <makeCustomizationType>
         <makeCustomizationPreStepEnabled>false</makeCustomizationPreStepEnabled>
@@ -69,8 +67,6 @@
         <makeCustomizationEnableLongLines>false</makeCustomizationEnableLongLines>
         <makeCustomizationNormalizeHexFile>false</makeCustomizationNormalizeHexFile>
       </makeCustomizationType>
-      <item path="../TFT_animation_BRL4.c" ex="true" overriding="false">
-      </item>
       <C32>
         <property key="additional-warnings" value="false"/>
         <property key="addresss-attribute-use" value="false"/>
@@ -92,7 +88,6 @@
         <property key="strict-ansi" value="false"/>
         <property key="support-ansi" value="false"/>
         <property key="toplevel-reordering" value=""/>
-        <property key="unaligned-access" value=""/>
         <property key="use-cci" value="false"/>
         <property key="use-iar" value="false"/>
         <property key="use-indirect-calls" value="false"/>
@@ -182,7 +177,6 @@
         <property key="rtti" value="true"/>
         <property key="strict-ansi" value="false"/>
         <property key="toplevel-reordering" value=""/>
-        <property key="unaligned-access" value=""/>
         <property key="use-cci" value="false"/>
         <property key="use-iar" value="false"/>
         <property key="use-indirect-calls" value="false"/>
@@ -191,9 +185,6 @@
         <property key="common-include-directories" value=""/>
         <property key="gp-relative-option" value=""/>
         <property key="legacy-libc" value="false"/>
-        <property key="mdtcm" value=""/>
-        <property key="mitcm" value=""/>
-        <property key="mstacktcm" value="false"/>
         <property key="relaxed-math" value="false"/>
         <property key="save-temps" value="false"/>
         <property key="wpo-lto" value="false"/>
@@ -210,16 +201,16 @@
         <property key="memories.eeprom" value="true"/>
         <property key="memories.id" value="true"/>
         <property key="memories.programmemory" value="true"/>
-        <property key="memories.programmemory.ranges" value="1d000000-1d01ffff"/>
+        <property key="memories.programmemory.end" value="0x1d01ffff"/>
+        <property key="memories.programmemory.start" value="0x1d000000"/>
         <property key="memories.userotp" value="true"/>
         <property key="programoptions.donoteraseauxmem" value="false"/>
         <property key="programoptions.eraseb4program" value="true"/>
         <property key="programoptions.preservedataflash" value="false"/>
-        <property key="programoptions.preservedataflash.ranges" value=""/>
         <property key="programoptions.preserveeeprom" value="false"/>
-        <property key="programoptions.preserveeeprom.ranges" value=""/>
-        <property key="programoptions.preserveprogram.ranges" value=""/>
         <property key="programoptions.preserveprogramrange" value="false"/>
+        <property key="programoptions.preserveprogramrange.end" value="0x1d0001ff"/>
+        <property key="programoptions.preserveprogramrange.start" value="0x1d000000"/>
         <property key="programoptions.usehighvoltageonmclr" value="false"/>
         <property key="programoptions.uselvpprogramming" value="true"/>
       </PKOBSKDEPlatformTool>

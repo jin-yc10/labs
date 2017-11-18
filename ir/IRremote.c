@@ -24,7 +24,9 @@
 #	include "IRremoteInt.h"
 #undef IR_GLOBAL
 
-unsigned int isr_counter = 0;
+unsigned int counter_mark = 0;
+unsigned int counter_space = 0;
+unsigned int counter_50us = 0;
 
 //+=============================================================================
 // The match functions were (apparently) originally MACROs to improve code speed
@@ -98,11 +100,20 @@ int  MATCH_SPACE (int measured_ticks,  int desired_us)
 void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) {
     // Just fot correction
     mT2ClearIntFlag();
-    isr_counter++;
+
 	// Read if IR Receiver -> SPACE [xmt LED off] or a MARK [xmt LED on]
 	// digitalRead() is very slow. Optimisation is possible, but makes the code unportable
     // TODO: read data
-	uint8_t  irdata;//(uint8_t)digitalRead(irparams.recvpin);
+    unsigned int ir_raw = mPORTBReadBits(BIT_9);
+	uint8_t irdata;//(uint8_t)digitalRead(irparams.recvpin);
+    if( ir_raw == 0x01<<9 ) {
+        irdata = SPACE;
+//        counter_space++;
+    } else {
+        irdata = MARK;        
+//        counter_mark++;
+    }
+    counter_50us++;
 
 	irparams.timer++;  // One more 50uS tick
 	if (irparams.rawlen >= RAWBUF)  irparams.rcvstate = STATE_OVERFLOW ;  // Buffer overflow

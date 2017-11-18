@@ -137,7 +137,7 @@ void  enableIRIn ( )
 
 	// Set pin modes
     // TODO: set input pin
-    
+    mPORTBSetPinsDigitalIn(BIT_9);
 //	pinMode(irparams.recvpin, INPUT);
 }
 

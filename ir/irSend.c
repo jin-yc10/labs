@@ -2,6 +2,15 @@
 #include "IRremote.h"
 #include "IRremoteInt.h"
 
+// = 40e6/38e3;
+
+void set_pwm_freq(unsigned int hz) {
+    CloseTimer3();
+    generate_period = 40e6/hz;
+//    printf("hz=%d, generate_period=%d\n", hz, generate_period );
+    OpenTimer3(T3_ON | T3_SOURCE_INT | T3_PS_1_1, generate_period);
+}
+
 //+=============================================================================
 void  sendRaw (const unsigned int buf[],  unsigned int len,  unsigned int hz) {
 	// Set IR carrier frequency
@@ -20,7 +29,7 @@ void  sendRaw (const unsigned int buf[],  unsigned int len,  unsigned int hz) {
 //
 void  mark (unsigned int time) {
     // TODO: enable pwm
-//	TIMER_ENABLE_PWM; // Enable pin 3 PWM output
+	TIMER_ENABLE_PWM; // Enable pin 3 PWM output
 	if (time > 0) custom_delay_usec(time);
 }
 
@@ -30,7 +39,7 @@ void  mark (unsigned int time) {
 // A space is no output, so the PWM output is disabled.
 //
 void  space (unsigned int time) {
-//	TIMER_DISABLE_PWM; // Disable pin 3 PWM output
+	TIMER_DISABLE_PWM; // Disable pin 3 PWM output
 	if (time > 0) custom_delay_usec(time);
 }
 
@@ -46,35 +55,29 @@ void  space (unsigned int time) {
 // A few hours staring at the ATmega documentation and this will all make sense.
 // See my Secrets of Arduino PWM at http://arcfn.com/2009/07/secrets-of-arduino-pwm.html for details.
 //
-void  enableIROut (int khz)
-{
-    // TODO: IR output, PWM?
-//	// Disable the Timer2 Interrupt (which is used for receiving IR)
-//	TIMER_DISABLE_INTR; //Timer2 Overflow Interrupt
-//
-//	pinMode(TIMER_PWM_PIN, OUTPUT);
-//	digitalWrite(TIMER_PWM_PIN, LOW); // When not sending PWM, we want it low
-//
-//	// COM2A = 00: disconnect OC2A
-//	// COM2B = 00: disconnect OC2B; to send signal set to 10: OC2B non-inverted
-//	// WGM2 = 101: phase-correct PWM with OCRA as top
-//	// CS2  = 000: no prescaling
-//	// The top value for the timer.  The modulation frequency will be SYSCLOCK / 2 / OCR2A.
-//	TIMER_CONFIG_KHZ(khz);
+void  enableIROut (int khz) {
+//    OpenTimer3(T3_ON | T3_SOURCE_INT | T3_PS_1_1, generate_period);
+    set_pwm_freq(khz*1000);
+    OpenOC3(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE , 0, 0);
+    PPSOutput(4, RPB0, OC3);
+//    TIMER_DISABLE_PWM
 }
 
 //+=============================================================================
 // Custom delay function that circumvents Arduino's delayMicroseconds limit
+unsigned long micros() {
+    return counter_50us*50;
+}
 
 void custom_delay_usec(unsigned long uSecs) {
     // TODO: add delay
-//  if (uSecs > 4) {
-//    unsigned long start = micros();
-//    unsigned long endMicros = start + uSecs - 4;
-//    if (endMicros < start) { // Check if overflow
-//      while ( micros() > start ) {} // wait until overflow
-//    }
-//    while ( micros() < endMicros ) {} // normal wait
-//  }
+  if (uSecs > 4) {
+    unsigned long start = micros();
+    unsigned long endMicros = start + uSecs - 4;
+    if (endMicros < start) { // Check if overflow
+      while ( micros() > start ) {} // wait until overflow
+    }
+    while ( micros() < endMicros ) {} // normal wait
+  }
 }
 

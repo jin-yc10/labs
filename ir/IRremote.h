@@ -23,8 +23,12 @@
 //
 #include "IRremoteInt.h"
 
-unsigned int isr_counter;
-
+unsigned int counter_space;
+unsigned int counter_mark;
+unsigned int counter_50us;
+static unsigned int generate_period;
+#define TIMER_ENABLE_PWM  SetDCOC3PWM(generate_period/2);
+#define TIMER_DISABLE_PWM SetDCOC3PWM(0);
 //------------------------------------------------------------------------------
 // Supported IR protocols
 // Each protocol you include costs memory and, during decode, costs time
@@ -48,8 +52,8 @@ unsigned int isr_counter;
 #define DECODE_JVC           0
 #define SEND_JVC             0
 
-#define DECODE_SAMSUNG       0
-#define SEND_SAMSUNG         0
+#define DECODE_SAMSUNG       1
+#define SEND_SAMSUNG         1
 
 #define DECODE_WHYNTER       0
 #define SEND_WHYNTER         0

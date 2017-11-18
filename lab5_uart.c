@@ -4,7 +4,35 @@
 #include "ir/IRremote.h"
 #include <stdlib.h>
 
-static struct pt pt_uart,pt_receiver;
+
+static struct pt pt_uart, pt_receiver, pt_ir;
+
+static PT_THREAD ( fn_ir(struct pt* pt )) {
+    decode_results results;
+    
+    PT_BEGIN(pt);
+//    TIMER_ENABLE_PWM
+    while( true ) {
+        PT_YIELD_TIME_msec(200);  
+//        SetDCOC3PWM(526);
+//        PT_YIELD_TIME_msec(100);  
+//        SetDCOC3PWM(0);
+        sendSAMSUNG(counter_50us, 32);
+        PT_YIELD_TIME_msec(200);
+        if(decode(&results)) {
+            printf("Success! type=%d, bits=%d, value=%d\n", 
+                        results.decode_type, 
+                        results.bits,
+                        results.value);
+            resume();
+        } else {
+//            printf("rawLen = %d\n", irparams.rawlen);
+        }
+    }
+    PT_EXIT(pt);
+    // and indicate the end of the thread
+    PT_END(pt);
+}
 
 static PT_THREAD (uartsend(struct pt *pt)) {
     static char character;
@@ -65,10 +93,10 @@ static PT_THREAD (uartreceiver(struct pt *pt))
     num_char = 0;
     //memset(term_buffer, 0, max_chars);
 
-    irparams.rcvstate = STATE_STOP;
-    irparams.rawlen = 26;
-    memcpy(irparams.rawbuf, sony_raw, 26*sizeof(int));
-    
+//    irparams.rcvstate = STATE_STOP;
+//    irparams.rawlen = 26;
+//    memcpy(irparams.rawbuf, sony_raw, 26*sizeof(int));
+//    
     decode_results results;
     
     while(num_char < max_chars) {
@@ -76,7 +104,7 @@ static PT_THREAD (uartreceiver(struct pt *pt))
         // yield until there is a valid character so that other
         // threads can execute
         PT_YIELD_UNTIL(pt, UARTReceivedDataIsAvailable(UART2));
-       // while(!UARTReceivedDataIsAvailable(UART2)){};
+        // while(!UARTReceivedDataIsAvailable(UART2)){};
         character = UARTGetDataByte(UART2);
         PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
         UARTSendDataByte(UART2, character);
@@ -86,15 +114,18 @@ static PT_THREAD (uartreceiver(struct pt *pt))
             PT_term_buffer[num_char] = 0; // zero terminate the string
             PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
             UARTSendDataByte(UART2, '\n');
-            if(decode(&results)) {
-                printf("Success! type=%d, bits=%d, address=%d, value=%d\n", 
-                        results.decode_type, 
-                        results.bits,
-                        results.value>>7,
-                        results.value&0x3f);
-            } else {
-                printf("Failed!\nrawLen=%d\n", results.rawlen);
-            }
+            
+//            if(decode(&results)) {
+//                printf("Success! type=%d, bits=%d, address=%d, value=%d\n", 
+//                        results.decode_type, 
+//                        results.bits,
+//                        results.value>>7,
+//                        results.value&0x3f);
+//            } else {
+//                printf("rawLen=%d mark=%d space=%d\n", 
+//                        results.rawlen, 
+//                        counter_mark, counter_space);
+//            }
             break;
         } else if (character == backspace){
             PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
@@ -135,13 +166,20 @@ void main() {
     
     PT_setup();
     INTEnableSystemMultiVectoredInt();
-    PT_INIT(&pt_uart);
+    PT_INIT(&pt_ir);
     PT_INIT(&pt_receiver);
    
+    enableIRIn();
+//    enableIROut(38);
+    
+    OpenTimer3(T3_ON | T3_SOURCE_INT | T3_PS_1_1, 1052);
+    OpenOC3(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE , 0, 0);
+    PPSOutput(4, RPB0, OC3);
+    
     sprintf(PT_send_buffer,"AT\r\n");
 
     while(1) {
-        //PT_SCHEDULE(uartsend(&pt_uart));
+        PT_SCHEDULE(fn_ir(&pt_ir));
         PT_SCHEDULE(uartreceiver(&pt_receiver));
     }
 }

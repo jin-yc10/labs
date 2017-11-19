@@ -6,24 +6,26 @@
 
 
 static struct pt pt_uart, pt_receiver, pt_ir;
-
+unsigned char record_buf[35] = {0};
 static PT_THREAD ( fn_ir(struct pt* pt )) {
     decode_results results;
-    
+    int uart_i;
+    unsigned int mask = 0;
     PT_BEGIN(pt);
 //    TIMER_ENABLE_PWM
     while( true ) {
-        PT_YIELD_TIME_msec(200);  
+        PT_YIELD_TIME_msec(100);
 //        SetDCOC3PWM(526);
 //        PT_YIELD_TIME_msec(100);  
 //        SetDCOC3PWM(0);
-        sendSAMSUNG(counter_50us, 32);
-        PT_YIELD_TIME_msec(200);
+//        sendSAMSUNG(counter_50us, 32);
+//        PT_YIELD_TIME_msec(200);
         if(decode(&results)) {
-            printf("Success! type=%d, bits=%d, value=%d\n", 
-                        results.decode_type, 
-                        results.bits,
-                        results.value);
+            printf("%d %u",results.decode_type, results.value);
+            for( uart_i=0; uart_i<results.rawlen; uart_i++) {
+                printf(" %d", results.rawbuf[uart_i]);
+            }
+            printf("\n");
             resume();
         } else {
 //            printf("rawLen = %d\n", irparams.rawlen);

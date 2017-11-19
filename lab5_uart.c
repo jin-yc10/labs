@@ -7,6 +7,9 @@
 
 static struct pt pt_uart, pt_receiver, pt_ir;
 unsigned char record_buf[35] = {0};
+
+unsigned char do_record = 0;
+
 static PT_THREAD ( fn_ir(struct pt* pt )) {
     decode_results results;
     int uart_i;
@@ -15,17 +18,18 @@ static PT_THREAD ( fn_ir(struct pt* pt )) {
 //    TIMER_ENABLE_PWM
     while( true ) {
         PT_YIELD_TIME_msec(100);
-//        SetDCOC3PWM(526);
-//        PT_YIELD_TIME_msec(100);  
-//        SetDCOC3PWM(0);
-//        sendSAMSUNG(counter_50us, 32);
-//        PT_YIELD_TIME_msec(200);
         if(decode(&results)) {
-            printf("%d %u",results.decode_type, results.value);
-            for( uart_i=0; uart_i<results.rawlen; uart_i++) {
-                printf(" %d", results.rawbuf[uart_i]);
+            if( do_record ) {
+                printf("RECORD %d %u",results.decode_type, results.value);
+                for( uart_i=0; uart_i<results.rawlen; uart_i++) {
+                    printf(" %d", results.rawbuf[uart_i]);
+                }
+                printf("\n");
+                do_record = 0;
+            } else {
+//                printf("SIGNAL type=%d value=%u\n", 
+//                        results.decode_type, results.value);
             }
-            printf("\n");
             resume();
         } else {
 //            printf("rawLen = %d\n", irparams.rawlen);
@@ -89,6 +93,9 @@ unsigned int sony_raw[26] = {
 static PT_THREAD (uartreceiver(struct pt *pt))
 {
     static char character;
+    static char command, type;
+    static unsigned int value = 0;
+    static int over_flow = 0;
     // mark the beginnning of the input thread
     PT_BEGIN(pt);
 
@@ -107,38 +114,81 @@ static PT_THREAD (uartreceiver(struct pt *pt))
         // threads can execute
         PT_YIELD_UNTIL(pt, UARTReceivedDataIsAvailable(UART2));
         // while(!UARTReceivedDataIsAvailable(UART2)){};
-        character = UARTGetDataByte(UART2);
-        PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
-        UARTSendDataByte(UART2, character);
+        command = UARTGetDataByte(UART2);
+        if( command == '1' ) {
+            // SEND
+            PT_YIELD_UNTIL(pt, UARTReceivedDataIsAvailable(UART2));
+            type = UARTGetDataByte(UART2)-'0';
+            value = 0;
+            over_flow = 0;
+            while( 1 ) {
+                PT_YIELD_UNTIL(pt, UARTReceivedDataIsAvailable(UART2));
+                // while(!UARTReceivedDataIsAvailable(UART2)){};
+                character = UARTGetDataByte(UART2);
+                over_flow ++;
+                if ( over_flow >= 15 ) {
+                    break;
+                }
+                if( character == '\r' ){
+                    // END OF COMMAND
+                    break;
+                } else {
+                    value *= 10;
+                    value += (character-'0');
+                }
+            }
+            printf("COMMAND=%d TYPE=%d VALUE=%u\n", command, type, value);
+            if( type == SONY) {
+//                printf("SEND SONY\n");
+            } else if( type == SAMSUNG) {
+//                printf("SEND SAMSUNG\n");
+                sendSAMSUNG(value, 32);
+            } else {
+//                printf("SEND UNKNOWN type=%d\n", type, SAMSUNG);
+            }
+        } else if( command == '0' ) {
+            // RECORD
+            do_record = 1;
+            PT_YIELD_UNTIL(pt, UARTReceivedDataIsAvailable(UART2));
+            // while(!UARTReceivedDataIsAvailable(UART2)){};
+            character = UARTGetDataByte(UART2);
+            if( character == '\r' ) {
+                // we are cool
+            }
+        } else {
+            printf("COMMAND=%d UNKNOWN\n", character);
+        }
+//        PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
+//        UARTSendDataByte(UART2, character);
 
         // end line
-        if(character == '\r'){
-            PT_term_buffer[num_char] = 0; // zero terminate the string
-            PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
-            UARTSendDataByte(UART2, '\n');
-            
-//            if(decode(&results)) {
-//                printf("Success! type=%d, bits=%d, address=%d, value=%d\n", 
-//                        results.decode_type, 
-//                        results.bits,
-//                        results.value>>7,
-//                        results.value&0x3f);
-//            } else {
-//                printf("rawLen=%d mark=%d space=%d\n", 
-//                        results.rawlen, 
-//                        counter_mark, counter_space);
-//            }
-            break;
-        } else if (character == backspace){
-            PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
-            UARTSendDataByte(UART2, ' ');
-            PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
-            UARTSendDataByte(UART2, backspace);
-            num_char--;
-            // check for buffer underflow
-            if (num_char < 0) {num_char = 0 ;}
-        }
-        else  {PT_term_buffer[num_char++] = character ;}
+//        if(character == '\r'){
+//            PT_term_buffer[num_char] = 0; // zero terminate the string
+//            PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
+//            UARTSendDataByte(UART2, '\n');
+//            
+////            if(decode(&results)) {
+////                printf("Success! type=%d, bits=%d, address=%d, value=%d\n", 
+////                        results.decode_type, 
+////                        results.bits,
+////                        results.value>>7,
+////                        results.value&0x3f);
+////            } else {
+////                printf("rawLen=%d mark=%d space=%d\n", 
+////                        results.rawlen, 
+////                        counter_mark, counter_space);
+////            }
+//            break;
+//        } else if (character == backspace){
+//            PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
+//            UARTSendDataByte(UART2, ' ');
+//            PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
+//            UARTSendDataByte(UART2, backspace);
+//            num_char--;
+//            // check for buffer underflow
+//            if (num_char < 0) {num_char = 0 ;}
+//        }
+//        else  {PT_term_buffer[num_char++] = character ;}
          //if (character == backspace)
     } //end while(num_char < max_size)
 

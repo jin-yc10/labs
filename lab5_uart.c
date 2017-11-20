@@ -6,16 +6,18 @@
 
 
 static struct pt pt_uart, pt_receiver, pt_ir;
-unsigned char record_buf[35] = {0};
-
-unsigned char do_record = 0;
+static unsigned char record_buf[35] = {0};
+static unsigned char do_record = 0;
+static unsigned char do_send = 0;
+static unsigned char command, type;
+static unsigned int value = 0;
 
 static PT_THREAD ( fn_ir(struct pt* pt )) {
     decode_results results;
     int uart_i;
     unsigned int mask = 0;
     PT_BEGIN(pt);
-//    TIMER_ENABLE_PWM
+    TIMER_ENABLE_PWM
     while( true ) {
         PT_YIELD_TIME_msec(100);
         if(decode(&results)) {
@@ -27,8 +29,13 @@ static PT_THREAD ( fn_ir(struct pt* pt )) {
                 printf("\n");
                 do_record = 0;
             } else {
-//                printf("SIGNAL type=%d value=%u\n", 
-//                        results.decode_type, results.value);
+                if( do_send ) {
+                    printf("SIGNAL type=%d value=%u ",
+                        results.decode_type, results.value);
+                    printf("COMMAND=%d TYPE=%d VALUE=%u\n",
+                            command, type, value);
+                    do_send = 0;
+                }
             }
             resume();
         } else {
@@ -93,12 +100,14 @@ unsigned int sony_raw[26] = {
 static PT_THREAD (uartreceiver(struct pt *pt))
 {
     static char character;
-    static char command, type;
-    static unsigned int value = 0;
+
     static int over_flow = 0;
     // mark the beginnning of the input thread
     PT_BEGIN(pt);
-
+    
+//    static unsigned char command, type;
+//    static unsigned int value = 0;
+//    
     num_char = 0;
     //memset(term_buffer, 0, max_chars);
 
@@ -117,6 +126,7 @@ static PT_THREAD (uartreceiver(struct pt *pt))
         command = UARTGetDataByte(UART2);
         if( command == '1' ) {
             // SEND
+            do_send = 1;
             PT_YIELD_UNTIL(pt, UARTReceivedDataIsAvailable(UART2));
             type = UARTGetDataByte(UART2)-'0';
             value = 0;
@@ -137,14 +147,12 @@ static PT_THREAD (uartreceiver(struct pt *pt))
                     value += (character-'0');
                 }
             }
-            printf("COMMAND=%d TYPE=%d VALUE=%u\n", command, type, value);
+//            printf("COMMAND=%d TYPE=%d VALUE=%u\n",
+//                            command, type, value);
             if( type == SONY) {
-//                printf("SEND SONY\n");
             } else if( type == SAMSUNG) {
-//                printf("SEND SAMSUNG\n");
                 sendSAMSUNG(value, 32);
             } else {
-//                printf("SEND UNKNOWN type=%d\n", type, SAMSUNG);
             }
         } else if( command == '0' ) {
             // RECORD
@@ -158,38 +166,7 @@ static PT_THREAD (uartreceiver(struct pt *pt))
         } else {
             printf("COMMAND=%d UNKNOWN\n", character);
         }
-//        PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
-//        UARTSendDataByte(UART2, character);
-
-        // end line
-//        if(character == '\r'){
-//            PT_term_buffer[num_char] = 0; // zero terminate the string
-//            PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
-//            UARTSendDataByte(UART2, '\n');
-//            
-////            if(decode(&results)) {
-////                printf("Success! type=%d, bits=%d, address=%d, value=%d\n", 
-////                        results.decode_type, 
-////                        results.bits,
-////                        results.value>>7,
-////                        results.value&0x3f);
-////            } else {
-////                printf("rawLen=%d mark=%d space=%d\n", 
-////                        results.rawlen, 
-////                        counter_mark, counter_space);
-////            }
-//            break;
-//        } else if (character == backspace){
-//            PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
-//            UARTSendDataByte(UART2, ' ');
-//            PT_YIELD_UNTIL(pt, UARTTransmitterIsReady(UART2));
-//            UARTSendDataByte(UART2, backspace);
-//            num_char--;
-//            // check for buffer underflow
-//            if (num_char < 0) {num_char = 0 ;}
-//        }
-//        else  {PT_term_buffer[num_char++] = character ;}
-         //if (character == backspace)
+        //if (character == backspace)
     } //end while(num_char < max_size)
 
     // kill this input thread, to allow spawning thread to execute
@@ -226,8 +203,10 @@ void main() {
     
     OpenTimer3(T3_ON | T3_SOURCE_INT | T3_PS_1_1, 1052);
     OpenOC3(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE , 0, 0);
-    PPSOutput(4, RPB0, OC3);
-    
+    PPSOutput(4, RPB14, OC3);
+//    generate_period = 1052;
+//    TIMER_ENABLE_PWM
+//            
     sprintf(PT_send_buffer,"AT\r\n");
 
     while(1) {
